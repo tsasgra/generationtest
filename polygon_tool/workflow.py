@@ -67,6 +67,12 @@ def text_equal(a: str, b: str) -> bool:
     return a.replace('\r\n', '\n') == b.replace('\r\n', '\n')
 
 
+def source_text_equal(a: str, b: str) -> bool:
+    """Allow a single terminal EOL difference when verifying C++ source files."""
+    a, b = a.replace('\r\n', '\n'), b.replace('\r\n', '\n')
+    return a == b or a == b + '\n' or b == a + '\n'
+
+
 class Workflow:
     def __init__(self, api, state_path: Path, parts: dict, options: dict,
                  *, log: Callable[[str], None] | None = None, sleep=time.sleep,
@@ -152,6 +158,36 @@ class Workflow:
     def solution_inventory(self):
         return {s['name']: {**s, 'sha256': digest(self.raw('problem.viewSolution', name=s['name']))}
                 for s in self.read('problem.solutions')}
+
+    def source_mismatches(self, filename, expected_content, source_type, *, solution=False):
+        """Explain a failed read-back without printing source code or credentials."""
+        rows = (self.read('problem.solutions') if solution else
+                self.read('problem.files').get('sourceFiles', []))
+        issues = []
+        if solution:
+            mains = [row for row in rows if row.get('tag') == 'MA']
+            if len(mains) != 1 or mains[0]['name'] != filename:
+                issues.append(f'{filename} phải là lời giải chính duy nhất (tag MA).')
+        matches = [row for row in rows if row['name'] == filename]
+        if len(matches) != 1:
+            return issues + [f'Không tìm thấy đúng một file {filename} trên Polygon.']
+        actual_type = matches[0].get('sourceType')
+        if actual_type != source_type:
+            issues.append(f'sourceType: cần {source_type!r}, Polygon trả {actual_type!r}.')
+        actual_content = (self.raw('problem.viewSolution', name=filename) if solution else
+                          self.raw('problem.viewFile', type='source', name=filename))
+        if not source_text_equal(actual_content, expected_content):
+            expected = expected_content.replace('\r\n', '\n')
+            actual = actual_content.replace('\r\n', '\n')
+            offset = next((i for i, (a, b) in enumerate(zip(expected, actual)) if a != b),
+                          min(len(expected), len(actual)))
+            line = expected.count('\n', 0, offset) + 1
+            column = offset - expected.rfind('\n', 0, offset)
+            issues.append('Nội dung khác sau khi chuẩn hóa CRLF/LF: '
+                          f'local {len(expected.encode("utf-8"))} byte, '
+                          f'Polygon {len(actual.encode("utf-8"))} byte; '
+                          f'vị trí khác đầu tiên: dòng {line}, cột {column}.')
+        return issues
 
     def snapshot(self):
         info = self.read('problem.info')
@@ -276,15 +312,19 @@ class Workflow:
         if before != after:
             raise WorkflowError(f'Xung đột thay đổi ngoài phạm vi request {method}.')
 
-    def action(self, label, method, params, sections, readers, satisfied):
+    def action(self, label, method, params, sections, readers, satisfied, *, mismatch_details=None):
         """Compare-before-write and verify-after-write. Pending writes are reconciled."""
+        def mismatch_error(message):
+            details = mismatch_details() if mismatch_details else []
+            return WorkflowError(message + (' ' + ' '.join(details) if details else ''))
+
         self.step = label
         self.check_revision()
         pending = self.state.get('pending')
         if pending and pending != label:
             # Earlier completed actions remain readable while a later action is pending.
             if not satisfied():
-                raise WorkflowError(f'Xung đột bước {label}; đang chờ xử lý {pending}.')
+                raise mismatch_error(f'Xung đột bước {label}; đang chờ xử lý {pending}.')
             return
         current = {key: reader() for key, reader in zip(sections, readers)}
         previous = {key: self.state['snapshot'][key] for key in sections}
@@ -296,7 +336,7 @@ class Workflow:
                 self.save()
                 return
             if current != previous:
-                raise WorkflowError(f'Bước {label} chưa hoàn tất và dữ liệu đã khác checkpoint; cần kiểm tra trên Polygon.')
+                raise mismatch_error(f'Bước {label} chưa hoàn tất và dữ liệu đã khác checkpoint; cần kiểm tra trên Polygon.')
         elif current != previous:
             raise WorkflowError(f'Xung đột thay đổi bên ngoài tại {label}; không ghi đè.')
         if satisfied():
@@ -310,7 +350,7 @@ class Workflow:
             # Keep intent: even a server failure may have partially changed state.
             raise
         if not satisfied():
-            raise WorkflowError(f'{label}: đọc lại không khớp dữ liệu đã gửi.')
+            raise mismatch_error(f'{label}: đọc lại không khớp dữ liệu đã gửi.')
         updated = {key: reader() for key, reader in zip(sections, readers)}
         self.verify_scope(method, params, previous, updated)
         self.state['snapshot'].update(updated)
@@ -334,24 +374,25 @@ class Workflow:
         self.action('statement', 'problem.saveStatement', {'lang': 'vietnamese', 'encoding': 'UTF-8', **statement},
                     ['statements'], [lambda: self.read('problem.statements')], statement_ok)
         for filename, part in [('checker.cpp', 'checker'), ('gen.cpp', 'gen')]:
+            mismatches = []
             def file_ok(filename=filename, part=part):
-                files = self.read('problem.files').get('sourceFiles', [])
-                return any(f['name'] == filename and f.get('sourceType') == source_type for f in files) and text_equal(
-                    self.raw('problem.viewFile', type='source', name=filename), p[part])
+                mismatches[:] = self.source_mismatches(filename, p[part], source_type)
+                return not mismatches
             self.action(filename, 'problem.saveFile', {'type': 'source', 'name': filename,
-                        'file': p[part], 'sourceType': source_type}, ['files'], [self.file_inventory], file_ok)
+                        'file': p[part], 'sourceType': source_type}, ['files'], [self.file_inventory], file_ok,
+                        mismatch_details=lambda: mismatches)
         self.action('checker', 'problem.setChecker', {'checker': 'checker.cpp'}, ['checker'],
                     [lambda: self.read('problem.checker')], lambda: self.read('problem.checker') == 'checker.cpp')
         solutions = self.read('problem.solutions')
         if any(s.get('tag') == 'MA' and s['name'] != 'solution.cpp' for s in solutions):
             raise WorkflowError('Có lời giải chính khác; không tự đổi tag hoặc xóa lời giải đó.')
+        mismatches = []
         def solution_ok():
-            rows = self.read('problem.solutions')
-            mains = [s for s in rows if s.get('tag') == 'MA']
-            return len(mains) == 1 and mains[0]['name'] == 'solution.cpp' and mains[0].get('sourceType') == source_type and text_equal(
-                self.raw('problem.viewSolution', name='solution.cpp'), p['solution'])
+            mismatches[:] = self.source_mismatches('solution.cpp', p['solution'], source_type, solution=True)
+            return not mismatches
         self.action('solution', 'problem.saveSolution', {'name': 'solution.cpp', 'file': p['solution'],
-                    'sourceType': source_type, 'tag': 'MA'}, ['solutions'], [self.solution_inventory], solution_ok)
+                    'sourceType': source_type, 'tag': 'MA'}, ['solutions'], [self.solution_inventory], solution_ok,
+                    mismatch_details=lambda: mismatches)
         if any(re.search(r'#\s*include\s*[<"]testlib\.h[>"]', p[part]) for part in ('checker', 'gen', 'solution')):
             resources = self.read('problem.files').get('resourceFiles', [])
             if not any(f['name'] == 'testlib.h' for f in resources):

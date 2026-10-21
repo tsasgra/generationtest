@@ -69,7 +69,7 @@ Tên file `name problem.txt` có một dấu cách giữa `name` và `problem`. 
 
 `name problem.txt` và `name.txt` độc lập. Tên hiển thị được dùng tiếng Việt nhưng phải nằm trên một dòng. Tên định danh được kiểm tra sơ bộ bằng `[a-z0-9-]+` (chữ thường, chữ số và dấu gạch ngang), không tự chuyển đổi; Polygon tiếp tục kiểm tra tên khi tạo bài. Tài liệu API công khai chưa liệt kê đầy đủ mọi giới hạn tên phía server.
 
-Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với hai file tên, một dấu xuống dòng cuối file được bỏ để hỗ trợ cách lưu thông thường của trình soạn thảo. Nội dung các file còn lại giữ nguyên tiếng Việt, LaTeX, backslash, `$`, `~`, thụt dòng, dấu cách và xuống dòng, kể cả các dòng trắng đầu/cuối. Request gửi nội dung đã đọc; khi đọc lại, CLI chấp nhận khác biệt CRLF/LF do Polygon chuẩn hóa. Script Polygon/FreeMarker chỉ được gửi lên Polygon, không được thực thi như shell trên máy bạn.
+Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với hai file tên, một dấu xuống dòng cuối file được bỏ để hỗ trợ cách lưu thông thường của trình soạn thảo. Nội dung các file còn lại giữ nguyên tiếng Việt, LaTeX, backslash, `$`, `~`, thụt dòng, dấu cách và xuống dòng, kể cả các dòng trắng đầu/cuối. Request gửi nội dung đã đọc; khi đọc lại, CLI chấp nhận khác biệt CRLF/LF do Polygon chuẩn hóa. Riêng checker, generator và solution, bước xác nhận còn chấp nhận chênh lệch đúng một dấu xuống dòng cuối file; nội dung bên trong và loại trình biên dịch vẫn phải khớp. Script Polygon/FreeMarker chỉ được gửi lên Polygon, không được thực thi như shell trên máy bạn.
 
 ## Kiểm tra trước khi tạo bài
 
@@ -145,6 +145,7 @@ Checkpoint có dấu vân tay nội dung và trạng thái server. `run` từ ch
 
 Các tình huống cần xử lý:
 
+- **Kẹt tại `checker.cpp`, `gen.cpp` hoặc `solution` sau khi tải file:** bản cũ có thể coi dấu xuống dòng cuối file là khác nội dung, rồi báo dữ liệu khác checkpoint khi `resume`. Chạy `git pull origin main`, giữ nguyên bộ đầu vào và `run_state.json`, rồi chạy lại `resume`. Nếu file đã đúng, công cụ xác nhận bước đó và tiếp tục trên cùng bài. Nếu vẫn không khớp, lỗi mới nêu rõ `sourceType` thực tế hoặc số byte/vị trí đầu tiên khác nội dung để đối chiếu; không xóa checkpoint để chạy lại từ đầu.
 - **Không nhận diện được sample:** kiểm tra chỉ số trong Tests rồi chạy `resume --state run_state.json --sample-indices 1,3`. Với resume thông thường, chỉ đổi danh sách sample trước commit.
 - **Hết thời gian poll:** chạy `resume` để chờ tiếp cùng package; có thể tăng `--poll-timeout 1800`.
 - **Mất phản hồi tạo bài:** CLI đọc lại server nhưng không tự gắn một bài chỉ vì trùng tên. Sau khi bạn xác nhận đúng bài vừa tạo trên Polygon, chạy `resume --state run_state.json --problem-id 123456`. ID phải thuộc danh sách mới sau thời điểm bắt đầu, đúng tên và bạn là owner. Nếu server chưa trả đủ bằng chứng, công cụ giữ checkpoint và dừng thay vì tạo thêm bài.
