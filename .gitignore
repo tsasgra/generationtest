@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.polygon-browser/
+run_state*.json
+run_state*.json.*
+result.json
+problem_url.txt
+problem_url.txt.tmp
+work/
+*.log
