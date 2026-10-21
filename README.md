@@ -1,6 +1,6 @@
-# Polygon Upload — 10 phần nội dung
+# Polygon Upload — 10 file .txt
 
-Công cụ Python tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
+Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục và tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
 
 ## Cài đặt trên Windows / PowerShell
 
@@ -24,39 +24,53 @@ Remove-Variable secret
 
 Các biến chỉ có hiệu lực trong phiên PowerShell hiện tại và các tiến trình con. `.env.example` liệt kê tên biến cần dùng; CLI **không tự nạp `.env`**. Không đưa key, secret hoặc thư mục phiên trình duyệt vào Git. Mã nguồn, checkpoint và kết quả không lưu credentials.
 
-## Chuẩn bị đầu vào
+## Chuẩn bị 10 file đầu vào
 
-Repository có `problem.txt` trống và ví dụ hoàn chỉnh `examples/a_plus_b.txt`. Để tạo một mẫu mới:
+Repository có thư mục `problem/` chứa 10 file trống và ví dụ hoàn chỉnh trong `examples/a_plus_b/`. Để tạo một bộ file mới:
 
 ```powershell
-.\.venv\Scripts\python.exe polygon_upload.py init --output my_problem.txt
+.\.venv\Scripts\python.exe polygon_upload.py init --output my_problem
 ```
 
-`init` không ghi đè file đã tồn tại. Mở file bằng trình soạn thảo hỗ trợ UTF-8, điền đủ 10 phần. Mỗi marker phải nằm riêng trên một dòng, đúng dạng `<<<PART: tên phần>>>`.
+Lệnh tạo thư mục `my_problem` cùng 10 file `.txt` trống. `init` không ghi đè thư mục đã tồn tại. Mở từng file bằng trình soạn thảo hỗ trợ UTF-8 rồi dán nội dung tương ứng trực tiếp vào file; **không cần marker `<<<PART: ...>>>`**.
 
-| Marker | Nội dung / vị trí trên Polygon |
+```text
+my_problem/
+├── name problem.txt
+├── name.txt
+├── lengend.txt
+├── input.txt
+├── output.txt
+├── note.txt
+├── checker.txt
+├── gen.txt
+├── script_sinh_test.txt
+└── solution.txt
+```
+
+| File | Nội dung / vị trí trên Polygon |
 | --- | --- |
-| `<<<PART: name problem>>>` | Tên định danh khi tạo bài |
-| `<<<PART: name>>>` | Tên hiển thị của statement tiếng Việt |
-| `<<<PART: lengend>>>` | Legend |
-| `<<<PART: input>>>` | Input format |
-| `<<<PART: output>>>` | Output format |
-| `<<<PART: note>>>` | Notes của statement |
-| `<<<PART: checker>>>` | `checker.cpp`, được chọn làm checker |
-| `<<<PART: gen>>>` | `gen.cpp` trong Source Files |
-| `<<<PART: script_sinh_test>>>` | Script của testset `tests` |
-| `<<<PART: solution>>>` | `solution.cpp` trong Solution files, tag `MA` |
+| `name problem.txt` | Tên định danh khi tạo bài, ví dụ `a-plus-b` |
+| `name.txt` | Tên hiển thị của statement tiếng Việt, ví dụ `Tổng hai số` |
+| `lengend.txt` | Legend |
+| `input.txt` | Input format |
+| `output.txt` | Output format |
+| `note.txt` | Notes của statement; có thể để trống |
+| `checker.txt` | Mã C++ được tải thành `checker.cpp` và chọn làm checker |
+| `gen.txt` | Mã C++ được tải thành `gen.cpp` trong Source Files |
+| `script_sinh_test.txt` | Script của testset `tests` |
+| `solution.txt` | Mã C++ được tải thành `solution.cpp` trong Solution files, tag `MA` |
 
-`lengend` giữ cách viết trong yêu cầu. Có thể dùng `legend` thay thế, nhưng không dùng cả hai. Thiếu marker, marker lạ, marker sai định dạng và marker trùng đều bị từ chối trước khi gọi API. `note` được để trống và gửi thành chuỗi rỗng; chín phần còn lại phải có nội dung.
+Tên file `name problem.txt` có một dấu cách giữa `name` và `problem`. `lengend.txt` giữ cách viết trong yêu cầu; có thể dùng `legend.txt` thay thế, nhưng không dùng cả hai. Thư mục phải có đủ 10 file tương ứng, không có file `.txt` lạ. Thiếu file, trùng phần qua alias hoặc file bắt buộc rỗng đều bị từ chối trước khi gọi API. `note.txt` rỗng hoặc chỉ chứa khoảng trắng được gửi thành chuỗi rỗng; chín file còn lại phải có nội dung.
 
-`name problem` và `name` độc lập. Tên hiển thị được dùng tiếng Việt nhưng phải nằm trên một dòng. Tên định danh được kiểm tra sơ bộ bằng `[a-z0-9-]+` (chữ thường, chữ số và dấu gạch ngang), không tự chuyển đổi; Polygon tiếp tục kiểm tra tên khi tạo bài. Tài liệu API công khai chưa liệt kê đầy đủ mọi giới hạn tên phía server.
+`name problem.txt` và `name.txt` độc lập. Tên hiển thị được dùng tiếng Việt nhưng phải nằm trên một dòng. Tên định danh được kiểm tra sơ bộ bằng `[a-z0-9-]+` (chữ thường, chữ số và dấu gạch ngang), không tự chuyển đổi; Polygon tiếp tục kiểm tra tên khi tạo bài. Tài liệu API công khai chưa liệt kê đầy đủ mọi giới hạn tên phía server.
 
-File được đọc dưới dạng UTF-8 có hoặc không có BOM. Parser bỏ BOM, các dòng trắng ngăn cách ở đầu/cuối phần và một lớp code fence bao ngoài khi nhận diện chắc chắn. Tiếng Việt, LaTeX, backslash, `$`, `~`, thụt dòng, dấu cách và xuống dòng **bên trong** được giữ nguyên. Request gửi nguyên nội dung đã tách; khi đọc lại, CLI chấp nhận khác biệt CRLF/LF do Polygon chuẩn hóa. Script Polygon/FreeMarker chỉ được gửi lên Polygon, không được thực thi như shell trên máy bạn.
+Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với hai file tên, một dấu xuống dòng cuối file được bỏ để hỗ trợ cách lưu thông thường của trình soạn thảo. Nội dung các file còn lại giữ nguyên tiếng Việt, LaTeX, backslash, `$`, `~`, thụt dòng, dấu cách và xuống dòng, kể cả các dòng trắng đầu/cuối. Request gửi nội dung đã đọc; khi đọc lại, CLI chấp nhận khác biệt CRLF/LF do Polygon chuẩn hóa. Script Polygon/FreeMarker chỉ được gửi lên Polygon, không được thực thi như shell trên máy bạn.
 
 ## Kiểm tra trước khi tạo bài
 
 ```powershell
-.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem.txt --dry-run
+.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem --dry-run
 ```
 
 `--dry-run` chạy hoàn toàn offline, không cần credentials, không gọi API và không tạo checkpoint hay sửa bài. Nó kiểm tra cấu trúc đầu vào và tùy chọn, rồi in kế hoạch. Biên dịch C++, triển khai FreeMarker, chỉ số sample và tính hợp lệ cuối cùng trên Polygon chỉ được xác nhận khi chạy thật.
@@ -64,15 +78,15 @@ File được đọc dưới dạng UTF-8 có hoặc không có BOM. Parser bỏ
 Ví dụ A+B:
 
 ```powershell
-.\.venv\Scripts\python.exe polygon_upload.py run --input examples/a_plus_b.txt --dry-run
+.\.venv\Scripts\python.exe polygon_upload.py run --input examples/a_plus_b --dry-run
 ```
 
-Ví dụ có sample `2 3`, đáp án `5`, generator nhận `sample|random ID`, cùng một sample và ba test thường. Trước khi chạy thật nhiều lần, đổi `name problem` sang tên mới và dùng checkpoint mới cho từng bài.
+Ví dụ có sample `2 3`, đáp án `5`, generator nhận `sample|random ID`, cùng một sample và ba test thường. Trước khi chạy thật nhiều lần, đổi nội dung `name problem.txt` sang tên mới và dùng checkpoint mới cho từng bài.
 
 ## Chạy và nhận kết quả
 
 ```powershell
-.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem.txt
+.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem
 ```
 
 Một lần chạy thành công thực hiện:
@@ -88,13 +102,13 @@ Một lần chạy thành công thực hiện:
 JSON kết quả gồm problem ID, tên định danh, tên hiển thị, ngôn ngữ, số test, sample indices, quyền `codeforces`, revision, package ID/trạng thái, link bài và giới hạn/tên file thực tế. Thông báo tiến độ nằm ở stderr. Để stdout chỉ có link sau khi thành công:
 
 ```powershell
-.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem.txt --url-only
+.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem --url-only
 ```
 
 Nếu muốn tách checkpoint/kết quả của từng bài:
 
 ```powershell
-.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem.txt --state run_state_my_problem.json --output-dir results\my_problem
+.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem --state run_state_my_problem.json --output-dir results\my_problem
 ```
 
 ## Sample và cấu hình
@@ -104,7 +118,7 @@ Sample tự động được nhận diện từ token hoặc giá trị tham s�
 Có thể ưu tiên danh sách chỉ số cụ thể:
 
 ```powershell
-.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem.txt --sample-indices 1,3
+.\.venv\Scripts\python.exe polygon_upload.py run --input my_problem --sample-indices 1,3
 ```
 
 Chỉ cờ `testUseInStatements` được cập nhật. Input và lệnh sinh test không được gửi lại khi đánh dấu sample. Test thường được đặt cờ false. Nếu không tìm được sample, công cụ dừng tại checkpoint, không tự lấy test đầu tiên.
@@ -125,7 +139,7 @@ Nếu không truyền time limit, memory limit hoặc tên file, CLI giữ mặc
 
 ## Tiếp tục khi bị gián đoạn
 
-Giữ nguyên file đầu vào và checkpoint, rồi chạy:
+Giữ nguyên thư mục gồm 10 file đầu vào và checkpoint, rồi chạy:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py resume --state run_state.json
@@ -143,13 +157,13 @@ Các tình huống cần xử lý:
 
 ### Chủ động sửa nội dung hoặc thử lại package thất bại
 
-Để sửa đề, checker, generator, script hoặc solution trên **cùng problem ID**, chuẩn bị file đủ 10 phần với nội dung đã sửa, giữ nguyên `name problem`, rồi chạy:
+Để sửa đề, checker, generator, script hoặc solution trên **cùng problem ID**, chuẩn bị thư mục đủ 10 file với nội dung đã sửa, giữ nguyên nội dung `name problem.txt`, rồi chạy:
 
 ```powershell
-.\.venv\Scripts\python.exe polygon_upload.py resume --state run_state.json --update-input corrected_problem.txt
+.\.venv\Scripts\python.exe polygon_upload.py resume --state run_state.json --update-input corrected_problem
 ```
 
-`--update-input` yêu cầu input thực sự thay đổi, problem ID/snapshot đã xác định và không còn request đang chờ xác minh kết quả. Trước khi chấp nhận file mới, công cụ kiểm tra revision cùng dữ liệu server vẫn khớp checkpoint; cờ này không cho phép ghi đè thay đổi bên ngoài. Sau đó công cụ tải nội dung sửa lên đúng bài, commit revision mới và tạo package mới. Có thể kèm `--sample-indices` nếu file mới đổi quy ước sample. Lịch sử revision/package cũ được giữ trong checkpoint.
+`--update-input` yêu cầu input thực sự thay đổi, problem ID/snapshot đã xác định và không còn request đang chờ xác minh kết quả. Trước khi chấp nhận thư mục đầu vào mới, công cụ kiểm tra revision cùng dữ liệu server vẫn khớp checkpoint; cờ này không cho phép ghi đè thay đổi bên ngoài. Sau đó công cụ tải nội dung sửa lên đúng bài, commit revision mới và tạo package mới. Có thể kèm `--sample-indices` nếu nội dung mới đổi quy ước sample. Lịch sử revision/package cũ được giữ trong checkpoint.
 
 Nếu nội dung không cần đổi và package thất bại do nguyên nhân tạm thời, có thể chủ động yêu cầu một lần build mới:
 
@@ -183,7 +197,7 @@ Chạy bộ kiểm thử offline/mock:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, marker thiếu/trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu.
+Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu.
 
 Đã biên dịch checker, generator và solution của ví dụ A+B bằng `g++ -std=c++17`, dùng `testlib.h` từ [repository chính thức của tác giả](https://github.com/MikeMirzayanov/testlib). Đã chạy cả bốn test của ví dụ qua generator → solution → checker: đều đạt; sample đúng `2 3` → `5`. Đây là kiểm thử C++ cục bộ, độc lập với mock API.
 

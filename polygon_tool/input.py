@@ -1,4 +1,4 @@
-"""Parse the ten-section UTF-8 format without rewriting statement/source text."""
+"""Read ten UTF-8 files, with support for legacy combined marker inputs."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ PARTS = (
     "script_sinh_test",
     "solution",
 )
+PART_FILES = {part: f"{part}.txt" for part in PARTS}
 
 _MARKER = re.compile(r"(?m)^<<<PART: ([^>\r\n]+)>>>(?:\r\n|\n|\r|$)")
 _MARKER_LIKE = re.compile(r"(?m)^[ \t]*<<<PART:[^\r\n]*")
@@ -32,6 +33,56 @@ _SLUG = re.compile(r"[a-z0-9-]+\Z", flags=re.ASCII)
 def template() -> str:
     """Return the blank template. Empty mandatory sections intentionally fail validation."""
     return "\n\n".join(f"<<<PART: {part}>>>" for part in PARTS) + "\n"
+
+
+def init_directory(path: str | Path) -> None:
+    """Create a new directory with the ten empty input files; never overwrite."""
+    directory = Path(path)
+    directory.mkdir(parents=True, exist_ok=False)
+    for filename in PART_FILES.values():
+        (directory / filename).touch(exist_ok=False)
+
+
+def _decode_file(path: Path) -> str:
+    try:
+        return path.read_bytes().decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"File {path.name!r} phải là UTF-8 (có hoặc không có BOM).") from exc
+
+
+def parse_directory(path: str | Path) -> dict[str, str]:
+    """Files are their own boundaries: preserve all content whitespace."""
+    directory = Path(path)
+    files = dict(PART_FILES)
+    if (directory / "legend.txt").exists():
+        if (directory / "lengend.txt").exists():
+            raise ValueError("Trùng phần lengend: không được có cả legend.txt và lengend.txt.")
+        files["lengend"] = "legend.txt"
+    missing = [name for name in files.values() if not (directory / name).is_file()]
+    if missing:
+        raise ValueError("Thiếu file đầu vào: " + ", ".join(missing) + ".")
+    unexpected = sorted(entry.name for entry in directory.iterdir()
+                        if entry.suffix.lower() == ".txt" and entry.name not in files.values())
+    if unexpected:
+        raise ValueError("Thư mục chỉ được có đúng 10 file .txt đầu vào; file không nhận diện: "
+                         + ", ".join(unexpected) + ".")
+    parts = {}
+    for part, filename in files.items():
+        value = _unwrap_fence(_decode_file(directory / filename))
+        # A text editor normally adds one final line ending to a one-line name.
+        # Keep all other spaces/newlines in names so invalid names are rejected.
+        if part in ("name problem", "name"):
+            if value.endswith("\r\n"):
+                value = value[:-2]
+            elif value.endswith(("\n", "\r")):
+                value = value[:-1]
+        if not value.strip():
+            if part != "note":
+                raise ValueError(f"File {filename!r} không được để trống.")
+            value = ""
+        parts[part] = value
+    validate_names(parts)
+    return parts
 
 
 def _boundaries(value: str) -> str:
@@ -120,10 +171,9 @@ def parse_text(text: str) -> dict[str, str]:
 
 
 def parse_problem(path: str | Path) -> dict[str, str]:
+    path = Path(path)
+    if path.is_dir():
+        return parse_directory(path)
     # read_text() defaults to universal-newline translation, which would alter
     # C++/LaTeX text on Windows. Decode bytes directly instead.
-    try:
-        text = Path(path).read_bytes().decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise ValueError("File đầu vào phải là UTF-8 (có hoặc không có BOM).") from exc
-    return parse_text(text)
+    return parse_text(_decode_file(path))

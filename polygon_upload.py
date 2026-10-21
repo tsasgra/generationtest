@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload ten verbatim sections to Codeforces Polygon."""
+"""Upload ten separate .txt files to Codeforces Polygon."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from polygon_tool.api import APIError, PolygonAPI, TransportError
-from polygon_tool.input import parse_problem, template
+from polygon_tool.input import init_directory, parse_problem
 from polygon_tool.problem_url import resolve_problem_url
 from polygon_tool.workflow import Workflow, WorkflowError, state_lock
 
@@ -41,10 +41,10 @@ def indices(value):
 def parser():
     cli = argparse.ArgumentParser(description=__doc__)
     sub = cli.add_subparsers(dest='command', required=True)
-    init = sub.add_parser('init', help='Tạo 10 marker trống, không ghi đè file đã có.')
-    init.add_argument('--output', type=Path, default=Path('problem.txt'))
+    init = sub.add_parser('init', help='Tạo thư mục gồm 10 file .txt trống, mỗi file là một phần.')
+    init.add_argument('--output', type=Path, default=Path('problem'), help='Thư mục mới để tạo 10 file .txt.')
     run = sub.add_parser('run', help='Kiểm tra và tạo một bài mới.')
-    run.add_argument('--input', type=Path, required=True)
+    run.add_argument('--input', type=Path, required=True, help='Thư mục chứa đủ 10 file .txt.')
     run.add_argument('--dry-run', action='store_true')
     run.add_argument('--time-limit', type=int)
     run.add_argument('--memory-limit', type=int)
@@ -55,7 +55,7 @@ def parser():
     resume.add_argument('--problem-id', type=int, help='Xác nhận ID sau create bị mất phản hồi.')
     resume.add_argument('--package-id', type=int, help='Chọn ID trong các package mới của revision đã commit.')
     correction = resume.add_mutually_exclusive_group()
-    correction.add_argument('--update-input', type=Path, help='Chủ động sửa nội dung trên cùng problem ID; server phải khớp checkpoint.')
+    correction.add_argument('--update-input', type=Path, help='Thư mục 10 file đã sửa trên cùng problem ID; server phải khớp checkpoint.')
     correction.add_argument('--retry-failed-package', action='store_true', help='Chủ động build lại package FAILED, giữ revision.')
     for command in (run, resume):
         command.add_argument('--state', type=Path, default=Path('run_state.json'))
@@ -96,10 +96,8 @@ def main(argv=None):
     workflow = None
     try:
         if args.command == 'init':
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            with args.output.open('x', encoding='utf-8', newline='\n') as stream:
-                stream.write(template())
-            print(f'Đã tạo {args.output}. Điền đủ nội dung trước khi run.')
+            init_directory(args.output)
+            print(f'Đã tạo 10 file .txt trong {args.output}. Điền nội dung vào từng file trước khi run.')
             return 0
         if args.command == 'run':
             options = {'input_path': str(args.input.resolve()), 'timeLimit': args.time_limit,

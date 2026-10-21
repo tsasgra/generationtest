@@ -24,7 +24,7 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {}, clear=True), patch.object(
                 polygon_upload, 'PolygonAPI', side_effect=AssertionError('Network forbidden')):
             state = Path(d) / 'state.json'
-            code, out, err = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b.txt'),
+            code, out, err = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b'),
                                           '--dry-run', '--state', str(state)])
             self.assertEqual(code, 0, err)
             self.assertTrue(json.loads(out)['valid'])
@@ -33,23 +33,24 @@ class CLITests(unittest.TestCase):
 
     def test_init_no_overwrite(self):
         with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / 'problem.txt'
+            path = Path(d) / 'problem'
             self.assertEqual(self.invoke(['init', '--output', str(path)])[0], 0)
-            self.assertEqual(path.read_text(encoding='utf-8').count('<<<PART:'), 10)
-            original = path.read_bytes()
+            self.assertEqual(len(list(path.glob('*.txt'))), 10)
+            (path / 'gen.txt').write_text('user generator', encoding='utf-8')
+            original = {f.name: f.read_bytes() for f in path.iterdir()}
             self.assertEqual(self.invoke(['init', '--output', str(path)])[0], 1)
-            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual({f.name: f.read_bytes() for f in path.iterdir()}, original)
 
     def test_invalid_limits_rejected_before_network(self):
         with patch.object(polygon_upload, 'PolygonAPI', side_effect=AssertionError('Network forbidden')):
             for args in (['--time-limit', '251'], ['--memory-limit', '1025'],
                          ['--input-file', 'same', '--output-file', 'SAME']):
-                code, _, _ = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b.txt'), '--dry-run', *args])
+                code, _, _ = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b'), '--dry-run', *args])
                 self.assertEqual(code, 1)
 
     def test_url_only_failure_stdout_empty(self):
         with patch.dict(os.environ, {}, clear=True):
-            code, out, err = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b.txt'), '--url-only'])
+            code, out, err = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b'), '--url-only'])
             self.assertEqual(code, 1)
             self.assertEqual(out, '')
             self.assertIn('POLYGON_API_KEY', err)
@@ -59,7 +60,7 @@ class CLITests(unittest.TestCase):
                 'POLYGON_API_KEY': 'test-key', 'POLYGON_API_SECRET': 'test-secret'}), patch.object(
                 polygon_upload, 'PolygonAPI'), patch.object(polygon_upload.Workflow, 'run', return_value={
                     'problem_url': 'https://polygon.codeforces.com/opaque/owner/problem'}):
-            code, out, err = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b.txt'),
+            code, out, err = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b'),
                 '--state', str(Path(d) / 'state.json'), '--url-only'])
             self.assertEqual(code, 0, err)
             self.assertEqual(out, 'https://polygon.codeforces.com/opaque/owner/problem\n')
@@ -68,7 +69,7 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {
                 'POLYGON_API_KEY': 'test-key', 'POLYGON_API_SECRET': 'test-secret'}), patch.object(
                 polygon_upload, 'PolygonAPI', side_effect=ValueError('test-key and test-secret')):
-            code, out, err = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b.txt'),
+            code, out, err = self.invoke(['run', '--input', str(ROOT / 'examples/a_plus_b'),
                                         '--state', str(Path(d) / 'state.json')])
             self.assertEqual(code, 1)
             self.assertNotIn('test-secret', err)

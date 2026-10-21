@@ -111,7 +111,7 @@ class InputTests(unittest.TestCase):
             parse_text(template())
 
     def test_example_parses(self):
-        file = Path(__file__).resolve().parents[1] / "examples" / "a_plus_b.txt"
+        file = Path(__file__).resolve().parents[1] / "examples" / "a_plus_b"
         parts = parse_problem(file)
         self.assertEqual(parts["name"], "Tổng hai số")
         self.assertIn("gen sample 1 > $", parts["script_sinh_test"])

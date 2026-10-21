@@ -1,0 +1,20 @@
+#include "testlib.h"
+#include <iostream>
+#include <string>
+
+int main(int argc, char* argv[]) {
+    registerGen(argc, argv, 1);
+    if (argc != 3) {
+        quitf(_fail, "usage: gen sample|random ID");
+    }
+    std::string mode = argv[1];
+    if (mode == "sample") {
+        std::cout << "2 3\n";
+    } else if (mode == "random") {
+        long long a = rnd.next(-1000000000LL, 1000000000LL);
+        long long b = rnd.next(-1000000000LL, 1000000000LL);
+        std::cout << a << " " << b << "\n";
+    } else {
+        quitf(_fail, "unknown mode");
+    }
+}

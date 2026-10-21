@@ -1,0 +1,14 @@
+#include "testlib.h"
+
+int main(int argc, char* argv[]) {
+    registerTestlibCmd(argc, argv);
+    long long expected = ans.readLong();
+    long long actual = ouf.readLong();
+    if (actual != expected) {
+        quitf(_wa, "expected %lld, found %lld", expected, actual);
+    }
+    if (!ouf.seekEof()) {
+        quitf(_pe, "unexpected extra output");
+    }
+    quitf(_ok, "sum is correct");
+}
