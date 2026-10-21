@@ -154,18 +154,20 @@ class Workflow:
                 for s in self.read('problem.solutions')}
 
     def snapshot(self):
+        info = self.read('problem.info')
         other_settings = {}
         for method in ('problem.interactor', 'problem.extraValidators', 'problem.viewTags',
                        'problem.viewGeneralDescription', 'problem.viewGeneralTutorial',
                        'problem.checkerTests', 'problem.validatorTests', 'problem.materials'):
-            value = self.read(method)
+            # Polygon rejects interactor queries for ordinary (non-interactive) problems.
+            value = '' if method == 'problem.interactor' and not info['interactive'] else self.read(method)
             if method in ('problem.checkerTests', 'problem.validatorTests'):
                 # Verification updates run results without changing the working copy.
                 value = [{k: v for k, v in row.items() if k not in ('runVerdict', 'runComment')}
                          for row in value]
             other_settings[method] = value
         return {
-            'info': self.read('problem.info'),
+            'info': info,
             'statements': self.read('problem.statements'),
             'files': self.file_inventory(),
             'solutions': self.solution_inventory(),
@@ -224,6 +226,7 @@ class Workflow:
 
     def initialize_snapshot(self):
         if 'snapshot' not in self.state:
+            self.step = 'snapshot'
             self.check_revision()
             self.state['snapshot'] = self.snapshot()
             self.save()
