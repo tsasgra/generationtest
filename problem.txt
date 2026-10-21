@@ -1,0 +1,19 @@
+<<<PART: name problem>>>
+
+<<<PART: name>>>
+
+<<<PART: lengend>>>
+
+<<<PART: input>>>
+
+<<<PART: output>>>
+
+<<<PART: note>>>
+
+<<<PART: checker>>>
+
+<<<PART: gen>>>
+
+<<<PART: script_sinh_test>>>
+
+<<<PART: solution>>>
