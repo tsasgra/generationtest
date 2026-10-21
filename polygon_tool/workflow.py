@@ -338,6 +338,14 @@ class Workflow:
             if current != previous:
                 raise mismatch_error(f'Bước {label} chưa hoàn tất và dữ liệu đã khác checkpoint; cần kiểm tra trên Polygon.')
         elif current != previous:
+            # The user may have completed "Set checker" in the web UI while
+            # stopped. Adopt only the requested selection; other changes still
+            # go through the normal scope and final snapshot checks.
+            if method == 'problem.setChecker' and satisfied():
+                self.verify_scope(method, params, previous, current)
+                self.state['snapshot'].update(current)
+                self.save()
+                return
             raise WorkflowError(f'Xung đột thay đổi bên ngoài tại {label}; không ghi đè.')
         if satisfied():
             return
@@ -357,6 +365,19 @@ class Workflow:
         self.state['pending'] = None
         self.save()
 
+    def activate_checker(self):
+        selected = []
+
+        def checker_ok():
+            selected[:] = [self.read('problem.checker')]
+            return selected[0] == 'checker.cpp'
+
+        self.action('checker', 'problem.setChecker', {'checker': 'checker.cpp'}, ['checker'],
+                    [lambda: self.read('problem.checker')], checker_ok,
+                    mismatch_details=lambda: [
+                        f'Checker cần dùng: checker.cpp; Polygon đang chọn: {selected[0]!r}.'])
+        self.log('Đã xác nhận checker đang dùng trên Polygon: checker.cpp.')
+
     def upload(self):
         p = self.parts
         source_type = self.options.get('source_type', 'cpp.g++17')
@@ -373,16 +394,24 @@ class Workflow:
             return all(isinstance(got.get(k), str) and text_equal(got[k], v) for k, v in statement.items())
         self.action('statement', 'problem.saveStatement', {'lang': 'vietnamese', 'encoding': 'UTF-8', **statement},
                     ['statements'], [lambda: self.read('problem.statements')], statement_ok)
-        for filename, part in [('checker.cpp', 'checker'), ('gen.cpp', 'gen')]:
+        def upload_source(filename, part):
             mismatches = []
-            def file_ok(filename=filename, part=part):
+            def file_ok():
                 mismatches[:] = self.source_mismatches(filename, p[part], source_type)
                 return not mismatches
             self.action(filename, 'problem.saveFile', {'type': 'source', 'name': filename,
                         'file': p[part], 'sourceType': source_type}, ['files'], [self.file_inventory], file_ok,
                         mismatch_details=lambda: mismatches)
-        self.action('checker', 'problem.setChecker', {'checker': 'checker.cpp'}, ['checker'],
-                    [lambda: self.read('problem.checker')], lambda: self.read('problem.checker') == 'checker.cpp')
+
+        upload_source('checker.cpp', 'checker')
+        # Old checkpoints can have an unresolved generator write before checker
+        # selection. Reconcile that write first, without replacing its intent.
+        defer_checker = self.state.get('pending') == 'gen.cpp'
+        if not defer_checker:
+            self.activate_checker()
+        upload_source('gen.cpp', 'gen')
+        if defer_checker:
+            self.activate_checker()
         solutions = self.read('problem.solutions')
         if any(s.get('tag') == 'MA' and s['name'] != 'solution.cpp' for s in solutions):
             raise WorkflowError('Có lời giải chính khác; không tự đổi tag hoặc xóa lời giải đó.')

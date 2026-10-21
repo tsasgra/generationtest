@@ -133,7 +133,7 @@ def main(argv=None):
             # Offline by design: no credentials, state, API reads, or remote writes.
             print(json.dumps({'valid': True, 'name': parts['name problem'], 'display_name': parts['name'],
                               'statement_language': 'vietnamese', 'sample_indices': options['sample_indices'],
-                              'plan': ['create', 'info', 'statement', 'checker.cpp', 'gen.cpp', 'checker',
+                              'plan': ['create', 'info', 'statement', 'checker.cpp', 'checker', 'gen.cpp',
                                        'solution (MA)', 'script (tests)', 'samples from server indices',
                                        'codeforces access', 'verify', 'commit', 'Standard package', 'official URL'],
                               'defaults': 'Giữ mặc định Polygon cho tùy chọn chưa truyền; in giá trị khi chạy thật.',

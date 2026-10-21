@@ -88,7 +88,7 @@ Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với
 Một lần chạy thành công thực hiện:
 
 1. Tạo bài mới, ghi problem ID vào `run_state.json` ngay khi nhận được.
-2. Lưu và đọc lại statement `vietnamese`; tải `checker.cpp`, `gen.cpp`, chọn checker và lưu `solution.cpp` với tag `MA`.
+2. Lưu và đọc lại statement `vietnamese`; tải và xác nhận nội dung `checker.cpp`, gọi `problem.setChecker` để chọn file này làm checker (tương đương nút **Set checker**), rồi đọc `problem.checker` xác nhận. Khi thành công, CLI in `Đã xác nhận checker đang dùng trên Polygon: checker.cpp.`, sau đó mới tải `gen.cpp` và lưu `solution.cpp` với tag `MA`.
 3. Lưu script test, lấy danh sách test thực tế từ Polygon, cập nhật cờ Example và kiểm tra lại.
 4. Thêm READ cho đúng login `codeforces` nếu chưa có quyền đọc. Quyền READ/WRITE/OWNER đã có được giữ; quyền của tài khoản khác không bị sửa.
 5. Kiểm tra dữ liệu và cảnh báo Polygon, commit, xác nhận revision sạch, yêu cầu package Standard với `full=false`, `verify=true`.
@@ -146,6 +146,7 @@ Checkpoint có dấu vân tay nội dung và trạng thái server. `run` từ ch
 Các tình huống cần xử lý:
 
 - **Kẹt tại `checker.cpp`, `gen.cpp` hoặc `solution` sau khi tải file:** bản cũ có thể coi dấu xuống dòng cuối file là khác nội dung, rồi báo dữ liệu khác checkpoint khi `resume`. Chạy `git pull origin main`, giữ nguyên bộ đầu vào và `run_state.json`, rồi chạy lại `resume`. Nếu file đã đúng, công cụ xác nhận bước đó và tiếp tục trên cùng bài. Nếu vẫn không khớp, lỗi mới nêu rõ `sourceType` thực tế hoặc số byte/vị trí đầu tiên khác nội dung để đối chiếu; không xóa checkpoint để chạy lại từ đầu.
+- **Files đã có `checker.cpp` nhưng Checker vẫn là `None`:** tải file và chọn checker là hai bước riêng. Bản hiện tại chọn checker ngay sau khi xác nhận file. Chạy `resume` với checkpoint cũ để hoàn tất bước còn thiếu. Nếu bạn đã chọn đúng `checker.cpp` trên web, công cụ xác nhận lựa chọn đó; nội dung file và compiler vẫn phải khớp đầu vào. Với checkpoint cũ đang chờ kết quả tải `gen.cpp`, công cụ xử lý request đang chờ trước rồi mới chọn checker.
 - **Không nhận diện được sample:** kiểm tra chỉ số trong Tests rồi chạy `resume --state run_state.json --sample-indices 1,3`. Với resume thông thường, chỉ đổi danh sách sample trước commit.
 - **Hết thời gian poll:** chạy `resume` để chờ tiếp cùng package; có thể tăng `--poll-timeout 1800`.
 - **Mất phản hồi tạo bài:** CLI đọc lại server nhưng không tự gắn một bài chỉ vì trùng tên. Sau khi bạn xác nhận đúng bài vừa tạo trên Polygon, chạy `resume --state run_state.json --problem-id 123456`. ID phải thuộc danh sách mới sau thời điểm bắt đầu, đúng tên và bạn là owner. Nếu server chưa trả đủ bằng chứng, công cụ giữ checkpoint và dừng thay vì tạo thêm bài.
