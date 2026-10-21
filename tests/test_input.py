@@ -110,11 +110,11 @@ class InputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "không được để trống"):
             parse_text(template())
 
-    def test_example_parses(self):
-        file = Path(__file__).resolve().parents[1] / "examples" / "a_plus_b"
-        parts = parse_problem(file)
-        self.assertEqual(parts["name"], "Tổng hai số")
-        self.assertIn("gen sample 1 > $", parts["script_sinh_test"])
+    def test_repository_input_has_ten_blank_files(self):
+        from polygon_tool.input import PART_FILES
+        directory = Path(__file__).resolve().parents[1] / "problem"
+        self.assertEqual({p.name for p in directory.iterdir()}, set(PART_FILES.values()))
+        self.assertTrue(all(p.read_bytes() == b"" for p in directory.iterdir()))
 
 
 if __name__ == "__main__":

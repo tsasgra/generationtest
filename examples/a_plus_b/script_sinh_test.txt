@@ -1,4 +1,0 @@
-gen sample 1 > $
-gen random 1 > $
-gen random 2 > $
-gen random 3 > $

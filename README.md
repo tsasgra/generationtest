@@ -26,7 +26,7 @@ Các biến chỉ có hiệu lực trong phiên PowerShell hiện tại và các
 
 ## Chuẩn bị 10 file đầu vào
 
-Repository có thư mục `problem/` chứa 10 file trống và ví dụ hoàn chỉnh trong `examples/a_plus_b/`. Để tạo một bộ file mới:
+Repository có một bộ 10 file đầu vào trống trong thư mục `problem/`. Điền nội dung trực tiếp vào bộ file này. Nếu cần tạo một bộ mới:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py init --output my_problem
@@ -74,14 +74,6 @@ Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với
 ```
 
 `--dry-run` chạy hoàn toàn offline, không cần credentials, không gọi API và không tạo checkpoint hay sửa bài. Nó kiểm tra cấu trúc đầu vào và tùy chọn, rồi in kế hoạch. Biên dịch C++, triển khai FreeMarker, chỉ số sample và tính hợp lệ cuối cùng trên Polygon chỉ được xác nhận khi chạy thật.
-
-Ví dụ A+B:
-
-```powershell
-.\.venv\Scripts\python.exe polygon_upload.py run --input examples/a_plus_b --dry-run
-```
-
-Ví dụ có sample `2 3`, đáp án `5`, generator nhận `sample|random ID`, cùng một sample và ba test thường. Trước khi chạy thật nhiều lần, đổi nội dung `name problem.txt` sang tên mới và dùng checkpoint mới cho từng bài.
 
 ## Chạy và nhận kết quả
 
@@ -199,7 +191,6 @@ Chạy bộ kiểm thử offline/mock:
 
 Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu.
 
-Đã biên dịch checker, generator và solution của ví dụ A+B bằng `g++ -std=c++17`, dùng `testlib.h` từ [repository chính thức của tác giả](https://github.com/MikeMirzayanov/testlib). Đã chạy cả bốn test của ví dụ qua generator → solution → checker: đều đạt; sample đúng `2 3` → `5`. Đây là kiểm thử C++ cục bộ, độc lập với mock API.
 
 **Chưa kiểm thử end-to-end trên tài khoản Polygon thật trong môi trường phát triển này:** kết nối mạng cloud đến Polygon chưa khả dụng. Khả năng compiler phía server, tải file thật, render statement, phiên đăng nhập browser và package thực tế cần được xác nhận bằng lần chạy của bạn. Không có problem ID, package hoặc link thành công thật được tạo sẵn trong repository.
 

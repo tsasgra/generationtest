@@ -6,24 +6,22 @@ from polygon_tool.input import PART_FILES, init_directory, parse_problem
 from polygon_tool.workflow import digest
 
 
-EXAMPLE = Path(__file__).resolve().parents[1] / 'examples' / 'a_plus_b'
-
-
 class DirectoryInputTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'problem'
         init_directory(self.path)
-        for filename in PART_FILES.values():
-            (self.path / filename).write_bytes((EXAMPLE / filename).read_bytes())
+        for part, filename in PART_FILES.items():
+            value = 'test-problem' if part == 'name problem' else 'Nội dung kiểm thử'
+            (self.path / filename).write_text(value, encoding='utf-8')
 
     def test_ten_raw_files_map_to_exact_parts_without_markers(self):
         parts = parse_problem(self.path)
         self.assertEqual(set(parts), set(PART_FILES))
         for part, name in PART_FILES.items():
             self.assertEqual(parts[part], (self.path / name).read_bytes().decode('utf-8'))
-        self.assertEqual(parts['name'], 'Tổng hai số')
+        self.assertEqual(parts['name'], 'Nội dung kiểm thử')
         self.assertNotEqual(parts['name problem'], parts['name'])
 
     def test_missing_file_even_empty_note_is_reported(self):

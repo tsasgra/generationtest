@@ -1,1 +1,0 @@
-Cho hai số nguyên $a$ và $b$. Hãy tính tổng $a+b$.

@@ -1,1 +1,0 @@
-Một dòng gồm hai số nguyên $a$ và $b$, với $-10^9 \le a,b \le 10^9$.
