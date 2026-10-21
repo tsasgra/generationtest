@@ -13,14 +13,9 @@ py -m venv .venv
 
 Phần API dùng thư viện chuẩn Python nên `requirements.txt` không có dependency bắt buộc. Các lệnh dưới dùng trực tiếp Python trong virtual environment, không cần đổi Execution Policy hoặc kích hoạt môi trường.
 
-Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Khi tải repo về máy khác, tạo file riêng từ mẫu rồi điền key/secret của bạn:
+Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Repository private này đã kèm `.env` theo cấu hình của chủ repo; bản clone từ GitHub có sẵn cấu hình để chạy. Điền đủ 10 file trong `problem/` trước khi upload.
 
-```powershell
-Copy-Item .env.example .env
-notepad .env
-```
-
-`.env` có hai dòng `POLYGON_API_KEY=...` và `POLYGON_API_SECRET=...`. File được Git bỏ qua và không đi kèm bản clone từ GitHub. Script không in credentials hoặc ghi chúng vào checkpoint/kết quả. Nó đọc giá trị nguyên văn, không chạy lệnh shell trong `.env`.
+Nếu muốn dùng tài khoản Polygon khác, sửa hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong `.env`. `.env.example` là mẫu để tham khảo. Script không in credentials hoặc ghi chúng vào checkpoint/kết quả; các giá trị trong `.env` được đọc nguyên văn, không chạy như lệnh shell.
 
 Bạn cũng có thể nhập credentials qua biến môi trường PowerShell; biến môi trường có giá trị sẽ được ưu tiên hơn `.env`:
 
