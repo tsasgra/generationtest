@@ -1,5 +1,4 @@
 .env.*
-!.env.example
 __pycache__/
 *.py[cod]
 .venv/
@@ -12,3 +11,5 @@ problem_url.txt
 problem_url.txt.tmp
 work/
 *.log
+tests/
+examples/
