@@ -13,7 +13,16 @@ py -m venv .venv
 
 Phần API dùng thư viện chuẩn Python nên `requirements.txt` không có dependency bắt buộc. Các lệnh dưới dùng trực tiếp Python trong virtual environment, không cần đổi Execution Policy hoặc kích hoạt môi trường.
 
-Nhập credentials tại prompt để chúng không nằm trong câu lệnh đã lưu của PowerShell:
+Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Khi tải repo về máy khác, tạo file riêng từ mẫu rồi điền key/secret của bạn:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+`.env` có hai dòng `POLYGON_API_KEY=...` và `POLYGON_API_SECRET=...`. File được Git bỏ qua và không đi kèm bản clone từ GitHub. Script không in credentials hoặc ghi chúng vào checkpoint/kết quả. Nó đọc giá trị nguyên văn, không chạy lệnh shell trong `.env`.
+
+Bạn cũng có thể nhập credentials qua biến môi trường PowerShell; biến môi trường có giá trị sẽ được ưu tiên hơn `.env`:
 
 ```powershell
 $env:POLYGON_API_KEY = Read-Host "Polygon API key"
@@ -22,7 +31,7 @@ $env:POLYGON_API_SECRET = [System.Net.NetworkCredential]::new("", $secret).Passw
 Remove-Variable secret
 ```
 
-Các biến chỉ có hiệu lực trong phiên PowerShell hiện tại và các tiến trình con. `.env.example` liệt kê tên biến cần dùng; CLI **không tự nạp `.env`**. Không đưa key, secret hoặc thư mục phiên trình duyệt vào Git. Mã nguồn, checkpoint và kết quả không lưu credentials.
+Các biến chỉ có hiệu lực trong phiên PowerShell hiện tại và các tiến trình con. `init` và `--dry-run` không cần đọc `.env` hoặc credentials.
 
 ## Chuẩn bị 10 file đầu vào
 

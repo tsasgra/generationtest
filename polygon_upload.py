@@ -9,9 +9,12 @@ import sys
 from pathlib import Path
 
 from polygon_tool.api import APIError, PolygonAPI, TransportError
+from polygon_tool.credentials import load_credentials
 from polygon_tool.input import init_directory, parse_problem
 from polygon_tool.problem_url import resolve_problem_url
 from polygon_tool.workflow import Workflow, WorkflowError, state_lock
+
+DEFAULT_ENV_FILE = Path(__file__).resolve().parent / '.env'
 
 
 def positive(value):
@@ -94,6 +97,7 @@ def validate_options(options):
 def main(argv=None):
     args = parser().parse_args(argv)
     workflow = None
+    key = secret = None
     try:
         if args.command == 'init':
             init_directory(args.output)
@@ -136,9 +140,7 @@ def main(argv=None):
                               'note': 'Sample tự động chỉ xác định sau khi Polygon triển khai script.'},
                              ensure_ascii=False, indent=2))
             return 0
-        key, secret = os.environ.get('POLYGON_API_KEY'), os.environ.get('POLYGON_API_SECRET')
-        if not key or not secret:
-            raise ValueError('Thiếu POLYGON_API_KEY/POLYGON_API_SECRET trong biến môi trường.')
+        key, secret = load_credentials(DEFAULT_ENV_FILE)
         with state_lock(args.state):
             if args.command == 'run' and args.state.exists():
                 raise ValueError('Checkpoint đã tồn tại. Dùng resume --state hoặc đường dẫn --state mới.')
@@ -166,7 +168,7 @@ def main(argv=None):
         # The transport strips credentials from remote comments; local exceptions
         # never contain request bodies. Keep progress and errors off stdout.
         message = str(exc)
-        for value in (os.environ.get('POLYGON_API_KEY'), os.environ.get('POLYGON_API_SECRET')):
+        for value in (key, secret, os.environ.get('POLYGON_API_KEY'), os.environ.get('POLYGON_API_SECRET')):
             if value:
                 message = message.replace(value, '[REDACTED]')
         step = workflow.step if workflow else 'preflight'

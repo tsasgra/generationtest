@@ -15,6 +15,10 @@ class CLITests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        self.env_file = Path(self.temp.name) / '.env'
+        env_patch = patch.object(polygon_upload, 'DEFAULT_ENV_FILE', self.env_file)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
         self.input_path = Path(self.temp.name) / 'problem'
         init_directory(self.input_path)
         for part, filename in PART_FILES.items():
@@ -82,6 +86,25 @@ class CLITests(unittest.TestCase):
             self.assertNotIn('test-secret', err)
             self.assertNotIn('test-key', err)
             self.assertEqual(out, '')
+
+    def test_local_env_reaches_transport_and_is_redacted_on_error(self):
+        self.env_file.write_text('POLYGON_API_KEY=file-key\nPOLYGON_API_SECRET=file-secret\n')
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+                polygon_upload, 'PolygonAPI', side_effect=ValueError('file-key file-secret')) as api:
+            code, out, err = self.invoke(['run', '--input', str(self.input_path),
+                                          '--state', str(Path(self.temp.name) / 'state.json')])
+            self.assertEqual(code, 1)
+            self.assertEqual(api.call_args.args, ('file-key', 'file-secret'))
+            self.assertNotIn('file-key', err)
+            self.assertNotIn('file-secret', err)
+            self.assertEqual(out, '')
+
+    def test_dry_run_never_loads_local_env(self):
+        self.env_file.write_bytes(b'\xff')
+        with patch.object(polygon_upload, 'load_credentials', side_effect=AssertionError('Must not load credentials')):
+            code, out, err = self.invoke(['run', '--input', str(self.input_path), '--dry-run'])
+            self.assertEqual(code, 0, err)
+            self.assertTrue(json.loads(out)['valid'])
 
 
 if __name__ == '__main__':
