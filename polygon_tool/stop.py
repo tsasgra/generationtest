@@ -1,12 +1,17 @@
-"""Stop Windows uploader process trees without targeting unrelated Python jobs."""
+"""Stop Windows uploader process trees and reset the launcher's local run."""
 from __future__ import annotations
 
 import json
 import os
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 import re
 import subprocess
 import sys
+
+from .workflow import WorkflowError, state_lock
+
+
+REPOSITORY_DIR = Path(__file__).resolve().parent.parent
 
 
 _PYTHON_NAME = re.compile(r'(?:py|pythonw?|python\d+(?:\.\d+)*)\.exe', re.IGNORECASE)
@@ -76,6 +81,19 @@ def stop_uploads() -> tuple[int, list[int]]:
     return stopped, failed
 
 
+def reset_checkpoint(directory: Path) -> None:
+    """Clear only this repository's default launcher state and output files."""
+    state = directory / 'run_state.json'
+    # Even an idle/failed run needs resetting. Do not parse its JSON: a damaged
+    # checkpoint must also be removable. The lock prevents deleting active state.
+    with state_lock(state):
+        for name in ('run_state.json.tmp', 'result.json.tmp', 'problem_url.txt.tmp',
+                     'result.json', 'problem_url.txt', 'run_state.json'):
+            (directory / name).unlink(missing_ok=True)
+    # Windows requires the lock handle to be closed before deleting its file.
+    state.with_name(state.name + '.lock').unlink(missing_ok=True)
+
+
 def main() -> int:
     if os.name != 'nt':
         print('stop.bat chỉ dùng trên Windows.', file=sys.stderr)
@@ -93,8 +111,16 @@ def main() -> int:
         print(f'Đã dừng {stopped} tiến trình uploader cùng các tiến trình con.')
     else:
         print('Không còn tiến trình uploader phù hợp đang chạy.')
-    print('Đã giữ nguyên dữ liệu và checkpoint. Bấm start_resume.bat khi muốn tiếp tục.')
-    print('Tác vụ Polygon đã nhận có thể vẫn tiếp tục trên máy chủ.')
+    try:
+        reset_checkpoint(REPOSITORY_DIR)
+    except (OSError, WorkflowError) as exc:
+        print(f'Chưa xóa hết checkpoint/kết quả cũ: {exc}', file=sys.stderr)
+        print('Đóng uploader rồi bấm stop.bat lại trước khi chạy bài mới.', file=sys.stderr)
+        return 1
+    print('Đã xóa checkpoint và kết quả cục bộ của lần chạy trước.')
+    print('Sửa nội dung trong problem, rồi bấm start.bat để bắt đầu bài mới.')
+    print('Dùng tên định danh mới trong problem/name problem.txt nếu tên cũ đã có trên Polygon.')
+    print('Bài đã tải và tác vụ Polygon đã nhận vẫn ở trên máy chủ.')
     return 0
 
 

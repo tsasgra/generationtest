@@ -57,7 +57,7 @@ set "POLYGON_EXIT_CODE=%errorlevel%"
 goto show_result
 
 :stop_upload
-echo Đang dừng các tiến trình Polygon Upload trên máy...
+echo Đang dừng Polygon Upload và xóa checkpoint để bắt đầu bài mới...
 "%POLYGON_PYTHON%" %POLYGON_PYTHON_ARGS% -m polygon_tool.stop
 set "POLYGON_EXIT_CODE=%errorlevel%"
 
@@ -68,8 +68,13 @@ echo Đã hoàn tất. Xem kết quả phía trên.
 goto done
 
 :execution_failed
+if /i "%~1"=="stop" goto stop_failed
 echo Chưa hoàn tất. Hãy xem thông báo lỗi phía trên.
 echo Giữ nguyên run_state.json nếu đã có; bấm start_resume.bat để tiếp tục sau khi xử lý lỗi.
+goto done
+
+:stop_failed
+echo Chưa hoàn tất việc dừng và xóa checkpoint. Hãy xem lỗi phía trên rồi bấm stop.bat lại.
 goto done
 
 :python_missing
