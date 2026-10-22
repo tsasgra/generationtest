@@ -1,4 +1,4 @@
-"""Verified, resumable Polygon workflow. Remote writes are never blindly retried."""
+"""Resumable Polygon workflow with acknowledged source and script uploads."""
 from __future__ import annotations
 
 import hashlib
@@ -67,12 +67,6 @@ def text_equal(a: str, b: str) -> bool:
     return a.replace('\r\n', '\n') == b.replace('\r\n', '\n')
 
 
-def source_text_equal(a: str, b: str) -> bool:
-    """Allow a single terminal EOL difference when verifying C++ source files."""
-    a, b = a.replace('\r\n', '\n'), b.replace('\r\n', '\n')
-    return a == b or a == b + '\n' or b == a + '\n'
-
-
 class Workflow:
     def __init__(self, api, state_path: Path, parts: dict, options: dict,
                  *, log: Callable[[str], None] | None = None, sleep=time.sleep,
@@ -82,6 +76,42 @@ class Workflow:
         self.sleep, self.clock = sleep, monotonic
         self.state = json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
         self.step = 'preflight'
+        self.migrate_upload_receipts()
+
+    def upload_requests(self):
+        source_type = self.options.get('source_type', 'cpp.g++17')
+        return {
+            'checker.cpp': ('problem.saveFile', {'type': 'source', 'name': 'checker.cpp',
+                            'file': self.parts['checker'], 'sourceType': source_type}),
+            'gen.cpp': ('problem.saveFile', {'type': 'source', 'name': 'gen.cpp',
+                        'file': self.parts['gen'], 'sourceType': source_type}),
+            'solution': ('problem.saveSolution', {'name': 'solution.cpp', 'file': self.parts['solution'],
+                         'sourceType': source_type, 'tag': 'MA'}),
+            'script': ('problem.saveScript', {'testset': 'tests', 'source': self.parts['script_sinh_test']}),
+        }
+
+    def migrate_upload_receipts(self):
+        """Use old completed snapshots once, then stop tracking managed content."""
+        if not self.state:
+            return
+        snapshot = self.state.get('snapshot', {})
+        if 'upload_receipts' not in self.state:
+            receipts = {}
+            if digest(self.parts) == self.state.get('input_digest'):
+                completed = {
+                    'checker.cpp': 'source:checker.cpp' in snapshot.get('files', {}),
+                    'gen.cpp': 'source:gen.cpp' in snapshot.get('files', {}),
+                    'solution': 'solution.cpp' in snapshot.get('solutions', {}),
+                    'script': bool(snapshot.get('script')),
+                }
+                for label, done in completed.items():
+                    if done and self.state.get('pending') != label:
+                        receipts[label] = digest(self.upload_requests()[label])
+            self.state['upload_receipts'] = receipts
+        snapshot.pop('script', None)
+        for name in ('source:checker.cpp', 'source:gen.cpp'):
+            snapshot.get('files', {}).pop(name, None)
+        snapshot.get('solutions', {}).pop('solution.cpp', None)
 
     def save(self):
         atomic_json(self.path, self.state)
@@ -147,8 +177,10 @@ class Workflow:
         groups = self.read('problem.files')
         for category, key in [('source', 'sourceFiles'), ('resource', 'resourceFiles'), ('aux', 'auxFiles')]:
             for item in groups.get(key, []):
-                # Text sources are verified byte-for-byte via viewFile; binary resources
-                # are tracked by metadata and never downloaded as text or rewritten.
+                if category == 'source' and item['name'] in ('checker.cpp', 'gen.cpp'):
+                    continue
+                # Only files outside the four managed uploads remain protected
+                # by remote snapshots. Never read managed source contents back.
                 meta = dict(item)
                 if category == 'source':
                     meta['sha256'] = digest(self.raw('problem.viewFile', type=category, name=item['name']))
@@ -157,37 +189,7 @@ class Workflow:
 
     def solution_inventory(self):
         return {s['name']: {**s, 'sha256': digest(self.raw('problem.viewSolution', name=s['name']))}
-                for s in self.read('problem.solutions')}
-
-    def source_mismatches(self, filename, expected_content, source_type, *, solution=False):
-        """Explain a failed read-back without printing source code or credentials."""
-        rows = (self.read('problem.solutions') if solution else
-                self.read('problem.files').get('sourceFiles', []))
-        issues = []
-        if solution:
-            mains = [row for row in rows if row.get('tag') == 'MA']
-            if len(mains) != 1 or mains[0]['name'] != filename:
-                issues.append(f'{filename} phải là lời giải chính duy nhất (tag MA).')
-        matches = [row for row in rows if row['name'] == filename]
-        if len(matches) != 1:
-            return issues + [f'Không tìm thấy đúng một file {filename} trên Polygon.']
-        actual_type = matches[0].get('sourceType')
-        if actual_type != source_type:
-            issues.append(f'sourceType: cần {source_type!r}, Polygon trả {actual_type!r}.')
-        actual_content = (self.raw('problem.viewSolution', name=filename) if solution else
-                          self.raw('problem.viewFile', type='source', name=filename))
-        if not source_text_equal(actual_content, expected_content):
-            expected = expected_content.replace('\r\n', '\n')
-            actual = actual_content.replace('\r\n', '\n')
-            offset = next((i for i, (a, b) in enumerate(zip(expected, actual)) if a != b),
-                          min(len(expected), len(actual)))
-            line = expected.count('\n', 0, offset) + 1
-            column = offset - expected.rfind('\n', 0, offset)
-            issues.append('Nội dung khác sau khi chuẩn hóa CRLF/LF: '
-                          f'local {len(expected.encode("utf-8"))} byte, '
-                          f'Polygon {len(actual.encode("utf-8"))} byte; '
-                          f'vị trí khác đầu tiên: dòng {line}, cột {column}.')
-        return issues
+                for s in self.read('problem.solutions') if s['name'] != 'solution.cpp'}
 
     def snapshot(self):
         info = self.read('problem.info')
@@ -207,7 +209,6 @@ class Workflow:
             'statements': self.read('problem.statements'),
             'files': self.file_inventory(),
             'solutions': self.solution_inventory(),
-            'script': self.raw('problem.script', testset='tests'),
             'tests': self.read('problem.tests', testset='tests', noInputs=True),
             'checker': self.read('problem.checker'),
             'validator': self.read('problem.validator'),
@@ -235,7 +236,8 @@ class Workflow:
                 raise WorkflowError('Đã có bài cùng tên. Hãy dùng checkpoint của bài đó hoặc chọn tên mới; không ghi đè theo tên.')
             self.state = {'version': 1, 'input_path': self.options['input_path'],
                           'input_digest': digest(self.parts), 'options': self.options,
-                          'create_before_ids': [r['id'] for r in existing], 'pending': 'create'}
+                          'create_before_ids': [r['id'] for r in existing], 'pending': 'create',
+                          'upload_receipts': {}}
             self.save()  # Durable intent BEFORE the non-idempotent request.
             result = self.api.call('problem.create', {'name': self.parts['name problem']}, mutation=True)
             self.bind_created(result)
@@ -287,11 +289,6 @@ class Workflow:
                         new.pop(key, None)
                 if old != new:
                     raise WorkflowError('Xung đột trường statement ngoài nội dung đang lưu.')
-        elif method in ('problem.saveFile', 'problem.saveSolution'):
-            section = 'files' if method == 'problem.saveFile' else 'solutions'
-            key = f'{params["type"]}:{params["name"]}' if section == 'files' else params['name']
-            before[section].pop(key, None)
-            after[section].pop(key, None)
         elif method == 'problem.saveTest':
             for row in before['tests']:
                 if row['index'] == params['testIndex']:
@@ -302,13 +299,6 @@ class Workflow:
         elif method == 'problem.setChecker':
             before.pop('checker')
             after.pop('checker')
-        elif method == 'problem.saveScript':
-            # Generated rows are server expansion (including FreeMarker).
-            # A script write does not authorize changes to manual tests.
-            before.pop('script')
-            after.pop('script')
-            before['tests'] = [t for t in before['tests'] if t.get('manual')]
-            after['tests'] = [t for t in after['tests'] if t.get('manual')]
         if before != after:
             raise WorkflowError(f'Xung đột thay đổi ngoài phạm vi request {method}.')
 
@@ -365,6 +355,39 @@ class Workflow:
         self.state['pending'] = None
         self.save()
 
+    def upload_without_readback(self, label):
+        """An API success acknowledges these named uploads; no content read-back."""
+        self.step = label
+        self.check_revision()
+        method, params = self.upload_requests()[label]
+        receipt = digest((method, params))
+        receipts = self.state.setdefault('upload_receipts', {})
+        if receipts.get(label) == receipt:
+            return
+        pending = self.state.get('pending')
+        if pending and pending != label:
+            raise WorkflowError(f'Chưa hoàn tất {label}; đang chờ xử lý {pending}.')
+        if label in ('checker.cpp', 'gen.cpp', 'solution'):
+            section = 'solutions' if label == 'solution' else 'files'
+            current = self.solution_inventory() if label == 'solution' else self.file_inventory()
+            if current != self.state['snapshot'][section]:
+                raise WorkflowError(f'Xung đột thay đổi ngoài các file đang tải tại {label}.')
+        self.log(f'Đang lưu: {label}')
+        self.state['pending'] = label
+        self.save()
+        # If an earlier response was lost, replay only this named save operation.
+        # problem.create, commits and package builds retain their own recovery.
+        self.write(method, **params)
+        if label == 'script':
+            tests = self.read('problem.tests', testset='tests', noInputs=True)
+            manual = lambda rows: [row for row in rows if row.get('manual')]
+            if manual(tests) != manual(self.state['snapshot']['tests']):
+                raise WorkflowError('Xung đột test thủ công ngoài script đang lưu.')
+            self.state['snapshot']['tests'] = tests
+        receipts[label] = receipt
+        self.state['pending'] = None
+        self.save()
+
     def activate_checker(self):
         selected = []
 
@@ -380,7 +403,6 @@ class Workflow:
 
     def upload(self):
         p = self.parts
-        source_type = self.options.get('source_type', 'cpp.g++17')
         info_updates = {k: self.options[k] for k in ('timeLimit', 'memoryLimit', 'inputFile', 'outputFile')
                         if self.options.get(k) is not None}
         self.action('info', 'problem.updateInfo', info_updates, ['info'],
@@ -394,44 +416,26 @@ class Workflow:
             return all(isinstance(got.get(k), str) and text_equal(got[k], v) for k, v in statement.items())
         self.action('statement', 'problem.saveStatement', {'lang': 'vietnamese', 'encoding': 'UTF-8', **statement},
                     ['statements'], [lambda: self.read('problem.statements')], statement_ok)
-        def upload_source(filename, part):
-            mismatches = []
-            def file_ok():
-                mismatches[:] = self.source_mismatches(filename, p[part], source_type)
-                return not mismatches
-            self.action(filename, 'problem.saveFile', {'type': 'source', 'name': filename,
-                        'file': p[part], 'sourceType': source_type}, ['files'], [self.file_inventory], file_ok,
-                        mismatch_details=lambda: mismatches)
-
-        upload_source('checker.cpp', 'checker')
+        self.upload_without_readback('checker.cpp')
         # Old checkpoints can have an unresolved generator write before checker
         # selection. Reconcile that write first, without replacing its intent.
         defer_checker = self.state.get('pending') == 'gen.cpp'
         if not defer_checker:
             self.activate_checker()
-        upload_source('gen.cpp', 'gen')
+        self.upload_without_readback('gen.cpp')
         if defer_checker:
             self.activate_checker()
         solutions = self.read('problem.solutions')
         if any(s.get('tag') == 'MA' and s['name'] != 'solution.cpp' for s in solutions):
             raise WorkflowError('Có lời giải chính khác; không tự đổi tag hoặc xóa lời giải đó.')
-        mismatches = []
-        def solution_ok():
-            mismatches[:] = self.source_mismatches('solution.cpp', p['solution'], source_type, solution=True)
-            return not mismatches
-        self.action('solution', 'problem.saveSolution', {'name': 'solution.cpp', 'file': p['solution'],
-                    'sourceType': source_type, 'tag': 'MA'}, ['solutions'], [self.solution_inventory], solution_ok,
-                    mismatch_details=lambda: mismatches)
+        self.upload_without_readback('solution')
         if any(re.search(r'#\s*include\s*[<"]testlib\.h[>"]', p[part]) for part in ('checker', 'gen', 'solution')):
             resources = self.read('problem.files').get('resourceFiles', [])
             if not any(f['name'] == 'testlib.h' for f in resources):
                 self.log('testlib.h không có trong resourceFiles; sẽ kiểm tra hỗ trợ thư viện qua build có verify=true.')
             else:
                 self.log('Đã xác nhận resource testlib.h trên Polygon.')
-        self.action('script', 'problem.saveScript', {'testset': 'tests', 'source': p['script_sinh_test']},
-                    ['script', 'tests'], [lambda: self.raw('problem.script', testset='tests'),
-                                         lambda: self.read('problem.tests', testset='tests', noInputs=True)],
-                    lambda: text_equal(self.raw('problem.script', testset='tests'), p['script_sinh_test']))
+        self.upload_without_readback('script')
         self.step = 'samples'
         tests = self.read('problem.tests', testset='tests', noInputs=True)
         samples = detect_sample_indices(tests, self.options.get('sample_indices'))

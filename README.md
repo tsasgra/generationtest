@@ -88,7 +88,9 @@ Tên file `name problem.txt` có một dấu cách giữa `name` và `problem`. 
 
 `name problem.txt` và `name.txt` độc lập. Tên hiển thị được dùng tiếng Việt nhưng phải nằm trên một dòng. Tên định danh được kiểm tra sơ bộ bằng `[a-z0-9-]+` (chữ thường, chữ số và dấu gạch ngang), không tự chuyển đổi; Polygon tiếp tục kiểm tra tên khi tạo bài. Tài liệu API công khai chưa liệt kê đầy đủ mọi giới hạn tên phía server.
 
-Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với hai file tên, một dấu xuống dòng cuối file được bỏ để hỗ trợ cách lưu thông thường của trình soạn thảo. Nội dung các file còn lại giữ nguyên tiếng Việt, LaTeX, backslash, `$`, `~`, thụt dòng, dấu cách và xuống dòng, kể cả các dòng trắng đầu/cuối. Request gửi nội dung đã đọc; khi đọc lại, CLI chấp nhận khác biệt CRLF/LF do Polygon chuẩn hóa. Riêng checker, generator và solution, bước xác nhận còn chấp nhận chênh lệch đúng một dấu xuống dòng cuối file; nội dung bên trong và loại trình biên dịch vẫn phải khớp. Script Polygon/FreeMarker chỉ được gửi lên Polygon, không được thực thi như shell trên máy bạn.
+Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với hai file tên, một dấu xuống dòng cuối file được bỏ để hỗ trợ cách lưu thông thường của trình soạn thảo. Nội dung các file còn lại giữ nguyên tiếng Việt, LaTeX, backslash, `$`, `~`, thụt dòng, dấu cách và xuống dòng, kể cả các dòng trắng đầu/cuối. Request gửi nội dung đã đọc. Statement vẫn được đọc lại và đối chiếu, chấp nhận khác biệt CRLF/LF.
+
+Theo cấu hình hiện tại, **checker, generator, solution và script không được đọc lại để so sánh nội dung hoặc compiler**. Khi API trả thành công, công cụ ghi nhận bước tải đã hoàn tất trong checkpoint. Bốn nội dung này cũng không được dùng để đối chiếu snapshot ở bước commit hoặc resume. Script Polygon/FreeMarker chỉ được gửi lên Polygon, không được thực thi như shell trên máy bạn. Việc chọn checker, gán tag `MA`, lấy danh sách test để đánh dấu sample và build package vẫn được thực hiện.
 
 ## Kiểm tra trước khi tạo bài
 
@@ -107,10 +109,10 @@ Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với
 Một lần chạy thành công thực hiện:
 
 1. Tạo bài mới, ghi problem ID vào `run_state.json` ngay khi nhận được.
-2. Lưu và đọc lại statement `vietnamese`; tải và xác nhận nội dung `checker.cpp`, gọi `problem.setChecker` để chọn file này làm checker (tương đương nút **Set checker**), rồi đọc `problem.checker` xác nhận. Khi thành công, CLI in `Đã xác nhận checker đang dùng trên Polygon: checker.cpp.`, sau đó mới tải `gen.cpp` và lưu `solution.cpp` với tag `MA`.
+2. Lưu và đọc lại statement `vietnamese`; tải `checker.cpp`, gọi `problem.setChecker` để chọn file này làm checker (tương đương nút **Set checker**), rồi đọc `problem.checker` xác nhận lựa chọn. Khi thành công, CLI in `Đã xác nhận checker đang dùng trên Polygon: checker.cpp.`, sau đó mới tải `gen.cpp` và lưu `solution.cpp` với tag `MA`. Không đọc lại nội dung ba file này.
 3. Lưu script test, lấy danh sách test thực tế từ Polygon, cập nhật cờ Example và kiểm tra lại.
 4. Thêm READ cho đúng login `codeforces` nếu chưa có quyền đọc. Quyền READ/WRITE/OWNER đã có được giữ; quyền của tài khoản khác không bị sửa.
-5. Kiểm tra dữ liệu và cảnh báo Polygon, commit, xác nhận revision sạch, yêu cầu package Standard với `full=false`, `verify=true`.
+5. Kiểm tra các cấu hình đang theo dõi và cảnh báo Polygon, commit, xác nhận revision sạch, yêu cầu package Standard với `full=false`, `verify=true`.
 6. Poll đúng package ID của revision đó đến `READY`; trạng thái `FAILED` luôn là lỗi.
 7. Lấy link chính thức, lưu `result.json` và `problem_url.txt`.
 
@@ -143,9 +145,9 @@ Chỉ cờ `testUseInStatements` được cập nhật. Input và lệnh sinh te
 | `--time-limit` | Millisecond, 250–15000, chia hết cho 50 |
 | `--memory-limit` | MB, 4–1024 |
 | `--input-file`, `--output-file` | Tên file vào/ra, mỗi tên 1–64 ký tự; không được giống nhau |
-| `--source-type` | Mặc định `cpp.g++17`, dùng cho checker, generator và solution; đọc lại loại đã lưu |
+| `--source-type` | Mặc định `cpp.g++17`, gửi cùng checker, generator và solution |
 | `--request-timeout` | Mặc định 60 giây mỗi request |
-| `--retries` | Mặc định 3 lần thử lại cho lỗi đọc tạm thời; request ghi không được tự gửi lại mù quáng |
+| `--retries` | Mặc định 3 lần thử lại cho lỗi đọc tạm thời; request ghi không tự lặp trong cùng lần chạy |
 | `--request-interval` | Mặc định 1 giây giữa các request |
 | `--poll-interval` | Mặc định 5 giây giữa các lần kiểm tra package |
 | `--poll-timeout` | Mặc định 900 giây cho một lần chờ package |
@@ -160,17 +162,19 @@ Giữ nguyên thư mục gồm 10 file đầu vào và checkpoint, rồi chạy:
 .\.venv\Scripts\python.exe polygon_upload.py resume --state run_state.json
 ```
 
-Checkpoint có dấu vân tay nội dung và trạng thái server. `run` từ chối dùng lại checkpoint đã tồn tại; `resume` tiếp tục trên đúng ID. Với `resume` thông thường, input phải giữ nguyên; dùng `--update-input` bên dưới nếu chủ động sửa nội dung. Khi phát hiện revision hoặc dữ liệu ngoài công cụ thay đổi, CLI dừng báo xung đột; không tự discard working copy hoặc ghi đè thay đổi đó.
+Checkpoint có dấu vân tay đầu vào local, ghi nhận các request upload đã thành công và trạng thái server đang theo dõi. `run` từ chối dùng lại checkpoint đã tồn tại; `resume` tiếp tục trên đúng ID. Với `resume` thông thường, input phải giữ nguyên; dùng `--update-input` bên dưới nếu chủ động sửa nội dung. Công cụ vẫn kiểm tra revision, statement, lựa chọn checker, test/sample, quyền truy cập và các file ngoài bốn phần upload. Nội dung `checker.cpp`, `gen.cpp`, `solution.cpp` và script không được đối chiếu với server.
+
+Nếu đang dở một trong bốn request upload này, `resume` gửi lại vào **đúng tên file/testset** rồi ghi nhận khi API trả thành công. Bước đã có ghi nhận thành công được bỏ qua khi đầu vào local không đổi. Checkpoint của bản cũ tự chuyển sang cơ chế này; các quy tắc khôi phục tạo bài, commit và build package vẫn được giữ riêng.
 
 Các tình huống cần xử lý:
 
-- **Kẹt tại `checker.cpp`, `gen.cpp` hoặc `solution` sau khi tải file:** bản cũ có thể coi dấu xuống dòng cuối file là khác nội dung, rồi báo dữ liệu khác checkpoint khi `resume`. Chạy `git pull origin main`, giữ nguyên bộ đầu vào và `run_state.json`, rồi chạy lại `resume`. Nếu file đã đúng, công cụ xác nhận bước đó và tiếp tục trên cùng bài. Nếu vẫn không khớp, lỗi mới nêu rõ `sourceType` thực tế hoặc số byte/vị trí đầu tiên khác nội dung để đối chiếu; không xóa checkpoint để chạy lại từ đầu.
-- **Files đã có `checker.cpp` nhưng Checker vẫn là `None`:** tải file và chọn checker là hai bước riêng. Bản hiện tại chọn checker ngay sau khi xác nhận file. Chạy `resume` với checkpoint cũ để hoàn tất bước còn thiếu. Nếu bạn đã chọn đúng `checker.cpp` trên web, công cụ xác nhận lựa chọn đó; nội dung file và compiler vẫn phải khớp đầu vào. Với checkpoint cũ đang chờ kết quả tải `gen.cpp`, công cụ xử lý request đang chờ trước rồi mới chọn checker.
+- **Kẹt tại `checker.cpp`, `gen.cpp`, `solution` hoặc `script` do lỗi đọc lại của bản cũ:** cập nhật repository, giữ nguyên bộ đầu vào và `run_state.json`, rồi bấm `start_resume.bat`. Công cụ gửi lại bước đang dở và tiếp tục trên cùng bài, không còn lỗi so sánh byte/nội dung cho bốn phần này.
+- **Files đã có `checker.cpp` nhưng Checker vẫn là `None`:** tải file và chọn checker là hai bước riêng. Bản hiện tại chọn checker sau khi API xác nhận tải file thành công. Chạy `resume` với checkpoint cũ để hoàn tất bước còn thiếu. Nếu bạn đã chọn đúng `checker.cpp` trên web, công cụ xác nhận lựa chọn đó. Với checkpoint cũ đang chờ kết quả tải `gen.cpp`, công cụ xử lý request đang chờ trước rồi mới chọn checker.
 - **Không nhận diện được sample:** kiểm tra chỉ số trong Tests rồi chạy `resume --state run_state.json --sample-indices 1,3`. Với resume thông thường, chỉ đổi danh sách sample trước commit.
 - **Hết thời gian poll:** chạy `resume` để chờ tiếp cùng package; có thể tăng `--poll-timeout 1800`.
 - **Mất phản hồi tạo bài:** CLI đọc lại server nhưng không tự gắn một bài chỉ vì trùng tên. Sau khi bạn xác nhận đúng bài vừa tạo trên Polygon, chạy `resume --state run_state.json --problem-id 123456`. ID phải thuộc danh sách mới sau thời điểm bắt đầu, đúng tên và bạn là owner. Nếu server chưa trả đủ bằng chứng, công cụ giữ checkpoint và dừng thay vì tạo thêm bài.
 - **Mất phản hồi build:** CLI đối chiếu các package mới của revision đã commit. Nếu có nhiều ứng viên, kiểm tra Packages rồi dùng `resume --state run_state.json --package-id 123456`. Không build lại trong khi chưa xác định kết quả request cũ.
-- **Package `FAILED`:** xem lỗi thật từ Polygon. `resume` thông thường vẫn theo dõi package đã thất bại. Nếu cần sửa nội dung hoặc chủ động thử lại một lỗi build tạm thời, dùng một trong hai lệnh bên dưới. Sửa bài trực tiếp trên web vẫn được phát hiện là xung đột và công cụ dừng.
+- **Package `FAILED`:** xem lỗi thật từ Polygon. `resume` thông thường vẫn theo dõi package đã thất bại. Nếu cần sửa nội dung hoặc chủ động thử lại một lỗi build tạm thời, dùng một trong hai lệnh bên dưới. Thay đổi trên web ở các phần còn được theo dõi vẫn được phát hiện là xung đột.
 
 ### Chủ động sửa nội dung hoặc thử lại package thất bại
 
@@ -180,7 +184,7 @@ Các tình huống cần xử lý:
 .\.venv\Scripts\python.exe polygon_upload.py resume --state run_state.json --update-input corrected_problem
 ```
 
-`--update-input` yêu cầu input thực sự thay đổi, problem ID/snapshot đã xác định và không còn request đang chờ xác minh kết quả. Trước khi chấp nhận thư mục đầu vào mới, công cụ kiểm tra revision cùng dữ liệu server vẫn khớp checkpoint; cờ này không cho phép ghi đè thay đổi bên ngoài. Sau đó công cụ tải nội dung sửa lên đúng bài, commit revision mới và tạo package mới. Có thể kèm `--sample-indices` nếu nội dung mới đổi quy ước sample. Lịch sử revision/package cũ được giữ trong checkpoint.
+`--update-input` yêu cầu input thực sự thay đổi, problem ID/snapshot đã xác định và không còn request đang chờ xác minh kết quả. Trước khi chấp nhận thư mục đầu vào mới, công cụ kiểm tra revision cùng các phần server còn được theo dõi. Bốn nội dung upload đã nêu không được đọc lại; phần có đầu vào local thay đổi sẽ được tải lên đúng tên file/testset, sau đó commit revision mới và tạo package mới. Có thể kèm `--sample-indices` nếu nội dung mới đổi quy ước sample. Lịch sử revision/package cũ được giữ trong checkpoint.
 
 Nếu nội dung không cần đổi và package thất bại do nguyên nhân tạm thời, có thể chủ động yêu cầu một lần build mới:
 
@@ -188,7 +192,7 @@ Nếu nội dung không cần đổi và package thất bại do nguyên nhân t
 .\.venv\Scripts\python.exe polygon_upload.py resume --state run_state.json --retry-failed-package
 ```
 
-`--retry-failed-package` chỉ hoạt động khi API xác nhận **đúng package ID trước đó đã `FAILED` ở cùng revision**, dữ liệu server khớp checkpoint và không có request chưa rõ kết quả. Nó giữ revision, tạo package mới có chủ đích; không dùng cho package `PENDING`, `RUNNING`, `READY` hoặc request build bị mất phản hồi. Hai cờ `--update-input` và `--retry-failed-package` loại trừ nhau.
+`--retry-failed-package` chỉ hoạt động khi API xác nhận **đúng package ID trước đó đã `FAILED` ở cùng revision**, dữ liệu đang theo dõi khớp checkpoint và không có request chưa rõ kết quả. Nó giữ revision, tạo package mới có chủ đích; không dùng cho package `PENDING`, `RUNNING`, `READY` hoặc request build bị mất phản hồi. Hai cờ `--update-input` và `--retry-failed-package` loại trừ nhau.
 
 Checkpoint được ghi nguyên tử và có khóa tiến trình để tránh hai lần chạy cùng ghi một state. Khi lỗi, CLI trả exit code khác 0, ghi bước lỗi và lệnh tiếp tục vào stderr. Chưa có cơ chế khóa chỉnh sửa đồng thời trên server; tránh sửa cùng bài trên web trong lúc công cụ chạy.
 
