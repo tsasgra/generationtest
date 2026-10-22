@@ -2,6 +2,20 @@
 
 Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục và tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
 
+## Bấm đúp để chạy trên Windows
+
+Sau khi cập nhật hoặc tải repository về máy, điền đủ 10 file trong `problem/` rồi bấm đúp một trong các file sau tại thư mục chính:
+
+| File | Chức năng |
+| --- | --- |
+| **`start.bat`** | Chạy upload ngay. Nếu đã có `run_state.json`, tự tiếp tục bài đó; nếu chưa có, tạo bài từ `problem/`. |
+| `start_resume.bat` | Tiếp tục bài trong `run_state.json`. Báo lỗi nếu chưa có checkpoint. |
+| `start_check.bat` | Kiểm tra đầu vào trong `problem/` bằng `--dry-run`, không gọi Polygon. |
+
+Các file start tự chuyển về thư mục repository và giữ cửa sổ mở để đọc kết quả/lỗi. Chúng tìm Python **3.10 trở lên** theo thứ tự: `.venv\Scripts\python.exe`, `py -3`, rồi `python`. Nếu máy đã có Python phù hợp, bạn không cần tạo virtual environment hoặc gõ lệnh để chạy phần API. Nếu chưa có, cửa sổ sẽ hướng dẫn cài Python.
+
+Giữ nguyên cấu trúc thư mục, bao gồm `polygon_tool/launch_windows.cmd` dùng chung cho các file start. Khi tiếp tục, script dùng thư mục đầu vào đã lưu trong checkpoint. Các file start không xóa checkpoint hay tự tạo bài khác khi đã có tiến độ; nếu bài đã hoàn tất, mở lại `start.bat` sẽ kiểm tra và trả lại kết quả của bài đó. Các tùy chọn nâng cao và trình duyệt lấy link vẫn dùng các lệnh bên dưới.
+
 ## Cài đặt trên Windows / PowerShell
 
 Cần Python **3.10 trở lên**. Chạy trong thư mục repository:
