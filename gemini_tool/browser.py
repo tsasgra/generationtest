@@ -254,5 +254,5 @@ def upload_images(images: list[PreparedImage], *, profile: Path, browser: str,
             f"Lỗi trình duyệt: {exc}\n"
             "Cần máy có giao diện và Google Chrome, hoặc --browser msedge. "
             "Với --browser chromium, cài bằng python -m playwright install chromium. "
-            "Nếu Google không cho đăng nhập trình duyệt tự động, dùng --cdp-url theo GEMINI.md."
+            "Nếu Google không cho đăng nhập trình duyệt tự động, dùng --cdp-url theo README.md."
         ) from exc
