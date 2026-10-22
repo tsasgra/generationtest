@@ -13,3 +13,7 @@ work/
 *.log
 tests/
 examples/
+.venv-gemini/
+.gemini-browser*/
+img/*
+!img/.gitkeep

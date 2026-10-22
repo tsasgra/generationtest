@@ -1,5 +1,9 @@
 # Polygon Upload — 10 file .txt
 
+**Tải ảnh lên Gemini:** đặt ảnh vào `img/`, rồi mở **`start_gemini.bat`**.
+Script mở chat Gemini mới và đính kèm ảnh. Xem [hướng dẫn Gemini](GEMINI.md)
+để cài đặt, đăng nhập, gửi kèm prompt và biết các định dạng hỗ trợ.
+
 Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục và tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
 
 ## Bấm đúp để chạy trên Windows
