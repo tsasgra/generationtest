@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
-"""Copy a ten-part Gemini answer into ten local UTF-8 text files."""
+"""Xuất 10 phần từ một chat Gemini thành 10 file .txt (Python 3.10+).
+
+Chỉ cần tải file này và chạy: python gemini_export.py
+Dán URL của chat cần copy; script hiển thị URL, mã chat và tên bài đã đọc.
+Kết quả nằm trong thư mục problem cạnh script. Chạy không tham số sẽ thay bộ
+10 file cũ sau khi đọc đủ nội dung. Lần đầu tự cài Playwright nếu cần.
+Xem các tùy chọn khác: python gemini_export.py --help
+"""
 from __future__ import annotations
 
 import argparse
+import importlib
+import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from urllib.parse import urlsplit
@@ -31,7 +41,7 @@ DOM_RESPONSES = r"""() => {
         roots = [...document.querySelectorAll(selector)];
         if (roots.length) break;
     }
-    return roots.map(root => {
+    const responses = roots.map(root => {
         const events = [];
         function walk(el) {
             if (el.tagName === 'PRE') {
@@ -49,6 +59,7 @@ DOM_RESPONSES = r"""() => {
         walk(root);
         return events;
     });
+    return {url: location.href, title: document.title, responses};
 }"""
 
 
@@ -185,17 +196,25 @@ def _conversation_key(value: str) -> list[str]:
 
 
 def read_browser(url: str, profile: Path, channel: str) -> dict[str, str]:
-    url = validate_gemini_url(url)
+    url = validate_gemini_url(url.strip())
+    print(f"\nChat Gemini sẽ copy: {url}")
+    print(f"Mã chat: {_conversation_key(url)[1]}")
+    print("Script chỉ đọc chat có mã này trong cửa sổ trình duyệt được mở.")
     try:
-        from playwright.sync_api import sync_playwright, Error as PlaywrightError
-    except ImportError as exc:
-        raise ValueError(
-            "Cài thư viện: python -m pip install -r requirements.txt"
-        ) from exc
+        importlib.import_module("playwright.sync_api")
+    except ImportError:
+        print("Lần đầu: đang cài Playwright...", flush=True)
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "playwright>=1.48,<2"], check=True)
+            importlib.invalidate_caches()
+            importlib.import_module("playwright.sync_api")
+        except (ImportError, OSError, subprocess.CalledProcessError) as exc:
+            raise ValueError("Chưa cài được Playwright. Chạy: python -m pip install playwright") from exc
+    from playwright.sync_api import sync_playwright, Error as PlaywrightError
     profile = profile.resolve()
-    print("Đăng nhập Gemini trong cửa sổ trình duyệt vừa mở, nếu cần.")
-    print("Mở đúng cuộc trò chuyện, chờ câu trả lời đủ Part 1–10 và cuộn tới cuối.")
-    print(f"Phiên đăng nhập lưu riêng tại {profile}; không dùng profile Chrome cá nhân.")
+    print("Đăng nhập Gemini trong cửa sổ mở ra, nếu cần.")
+    print("Kiểm tra link trên thanh địa chỉ, chờ đủ Part 1–10 và cuộn tới cuối.")
+    print("Sẽ lấy câu trả lời cuối cùng có các tiêu đề Part trong chat đã chọn.")
     with sync_playwright() as playwright:
         context = None
         channels = ["chrome", "msedge", "chromium"] if channel == "auto" else [channel]
@@ -212,7 +231,7 @@ def read_browser(url: str, profile: Path, channel: str) -> dict[str, str]:
             raise ValueError(
                 "Không mở được trình duyệt. Đóng cửa sổ dùng cùng --browser-profile rồi thử lại. "
                 "Cài Chrome/Edge, hoặc chạy python -m playwright install chromium. "
-                "Nếu Google chặn đăng nhập, dùng --from-file theo README."
+                "Nếu Google chặn đăng nhập, dùng --from-file (xem --help)."
             )
         try:
             page = context.pages[0] if context.pages else context.new_page()
@@ -233,7 +252,7 @@ def read_browser(url: str, profile: Path, channel: str) -> dict[str, str]:
                         except ValueError:
                             pass
                 if len(pages) != 1:
-                    print("Giữ đúng một tab mở link đã nhập, rồi thử lại.", file=sys.stderr)
+                    print(f"Giữ đúng một tab mở chat {url}, rồi thử lại.", file=sys.stderr)
                     continue
                 try:
                     if pages[0].locator(
@@ -242,13 +261,23 @@ def read_browser(url: str, profile: Path, channel: str) -> dict[str, str]:
                         'button[aria-label="Dừng phản hồi"]:visible'
                     ).count():
                         raise ValueError("Gemini đang trả lời. Chờ hoàn tất rồi nhấn Enter lại.")
-                    responses = pages[0].evaluate(DOM_RESPONSES)
+                    snapshot = pages[0].evaluate(DOM_RESPONSES)
+                    # Check the URL in the same DOM snapshot as the answer, so
+                    # navigating to another chat cannot export the wrong one.
+                    if _conversation_key(snapshot["url"]) != _conversation_key(url):
+                        raise ValueError(f"Trang đã chuyển sang chat khác. Mở lại {url}.")
+                    responses = snapshot["responses"]
                     candidates = [events for events in responses if any("part" in e for e in events)]
                     if not candidates:
                         raise ValueError("Không thấy Part 1–10 trong câu trả lời; cuộn tới câu trả lời cần xuất.")
                     # Never fall back to an older complete response if a newer
                     # ten-part answer is truncated or still being generated.
-                    return parts_from_events(candidates[-1])
+                    parts = parts_from_events(candidates[-1])
+                    print(f'\nĐã đọc từ chat: {snapshot["url"]}')
+                    print(f'Tiêu đề trang: {snapshot["title"]}')
+                    print(f'Tên bài (Part 1): {parts["name problem"]}')
+                    print(f'Tên hiển thị (Part 2): {parts["name"]}')
+                    return parts
                 except (ValueError, PlaywrightError) as exc:
                     print(f"Chưa xuất được: {exc}\nCó thể sửa trang rồi nhấn Enter lại, hoặc Ctrl+C để dừng.",
                           file=sys.stderr)
@@ -257,22 +286,38 @@ def read_browser(url: str, profile: Path, channel: str) -> dict[str, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    interactive = argv is None and len(sys.argv) == 1
+    script_directory = Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Chọn chat: mở cuộc trò chuyện Gemini, copy URL trên thanh địa chỉ rồi dán khi được hỏi.\n"
+            "Hoặc chỉ định: python gemini_export.py --url https://gemini.google.com/app/MA_CHAT --overwrite\n\n"
+            "Nếu không đăng nhập được trong trình duyệt tự động: dùng Copy response trên Gemini,\n"
+            "lưu một câu trả lời đầy đủ dạng Markdown (giữ tiêu đề Part 1–10 và code fence) vào\n"
+            "một file UTF-8, rồi chạy: python gemini_export.py --from-file response.md --overwrite"
+        ),
+    )
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--url", help="Link cuộc trò chuyện Gemini (mở trình duyệt để đăng nhập).")
     source.add_argument("--from-file", type=Path, help="File UTF-8 chứa một câu trả lời Markdown đã copy.")
-    parser.add_argument("--output", type=Path, default=Path("problem"))
+    parser.add_argument("--output", type=Path, default=script_directory / "problem",
+                        help="Thư mục đầu ra; mặc định là problem cạnh script.")
     parser.add_argument("--overwrite", action="store_true", help="Thay bộ 10 file đã tồn tại.")
-    parser.add_argument("--browser-profile", type=Path, default=Path(".gemini-browser"))
+    parser.add_argument("--browser-profile", type=Path, default=script_directory / ".gemini-browser")
     parser.add_argument("--channel", choices=("auto", "chrome", "msedge", "chromium"), default="auto")
     args = parser.parse_args(argv)
     try:
         if args.from_file:
+            print(f"Nguồn đã copy: {args.from_file.resolve()}")
             parts = parse_response(args.from_file.read_bytes().decode("utf-8-sig"))
         else:
-            url = args.url or input("Dán link cuộc trò chuyện Gemini: ").strip()
+            print(f"Thư mục lưu 10 file: {args.output.resolve()}")
+            if interactive or args.overwrite:
+                print("Bộ 10 file cũ trong thư mục này sẽ được thay khi đọc đủ nội dung.")
+            url = args.url or input("Dán URL trên thanh địa chỉ của chat Gemini cần copy: ").strip()
             parts = read_browser(url, args.browser_profile, args.channel)
-        write_parts(parts, args.output, overwrite=args.overwrite)
+        write_parts(parts, args.output, overwrite=args.overwrite or interactive)
     except (ValueError, OSError, EOFError) as exc:
         print(f"Lỗi: {exc}", file=sys.stderr)
         return 1
@@ -286,4 +331,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit_code = main()
+    if os.name == "nt" and len(sys.argv) == 1:
+        try:
+            input("Nhấn Enter để đóng cửa sổ: ")
+        except (EOFError, KeyboardInterrupt):
+            pass
+    raise SystemExit(exit_code)

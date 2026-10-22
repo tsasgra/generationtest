@@ -1,2 +1,0 @@
-# Browser export dependency; --from-file uses only the Python standard library.
-playwright>=1.48,<2
