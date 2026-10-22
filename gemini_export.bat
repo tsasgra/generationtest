@@ -55,6 +55,9 @@ exit /b %GEMINI_EXIT_CODE%
 from __future__ import annotations
 
 import importlib
+import json
+import os
+import socket
 from pathlib import Path
 import re
 import shutil
@@ -62,7 +65,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
+from urllib.request import ProxyHandler, build_opener
 
 PARTS = (
     "name problem", "name", "lengend", "input", "output", "note",
@@ -199,6 +203,144 @@ def _conversation_key(value: str) -> list[str]:
     return urlsplit(validate_gemini_url(value)).path.rstrip("/").split("/")[-2:]
 
 
+def find_system_browser() -> tuple[str, Path]:
+    """Use the installed, supported browser and its normal login UI."""
+    for name, executable, relative in (
+        ("chrome", "chrome.exe", "Google/Chrome/Application/chrome.exe"),
+        ("edge", "msedge.exe", "Microsoft/Edge/Application/msedge.exe"),
+    ):
+        candidates = []
+        if sys.platform == "win32":
+            import winreg
+            for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+                    try:
+                        with winreg.OpenKey(
+                            hive, rf"Software\Microsoft\Windows\CurrentVersion\App Paths\{executable}",
+                            0, winreg.KEY_READ | view,
+                        ) as key:
+                            value = winreg.QueryValueEx(key, None)[0]
+                            candidates.append(Path(os.path.expandvars(value.strip('"'))))
+                    except OSError:
+                        pass
+        for variable in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"):
+            base = os.environ.get(variable)
+            if base:
+                candidates.append(Path(base) / relative)
+        on_path = shutil.which(executable)
+        if on_path:
+            candidates.append(Path(on_path))
+        for candidate in candidates:
+            if candidate.is_file():
+                return name, candidate.resolve()
+    raise ValueError("Cần Google Chrome hoặc Microsoft Edge bản cập nhật trên máy để đăng nhập Gemini.")
+
+
+def read_debug_json(port: int, route: str):
+    if not isinstance(port, int) or not 1024 <= port <= 65535:
+        raise ValueError("Cổng kết nối trình duyệt không hợp lệ.")
+    # Only local discovery metadata is read here, never login fields/cookies.
+    opener = build_opener(ProxyHandler({}))
+    with opener.open(f"http://127.0.0.1:{port}{route}", timeout=1) as response:
+        return json.loads(response.read(262144))
+
+
+def debug_endpoint(port: int) -> dict:
+    info = read_debug_json(port, "/json/version")
+    websocket = urlsplit(info["webSocketDebuggerUrl"])
+    if (websocket.scheme != "ws" or websocket.hostname != "127.0.0.1"
+            or websocket.port != port or not websocket.path.startswith("/devtools/browser/")):
+        raise ValueError("Kết nối trình duyệt không thuộc phiên cục bộ này.")
+    return info
+
+
+def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[str]]:
+    name, executable = find_system_browser()
+    profile = (profile_root / name).resolve()
+    profile.mkdir(parents=True, exist_ok=True)
+    session_file = profile / "gemini-export-session.json"
+    # Reuse only the exact browser instance previously started by this tool.
+    try:
+        saved = json.loads(session_file.read_text(encoding="utf-8"))
+        info = debug_endpoint(saved["port"])
+        if info["webSocketDebuggerUrl"] == saved["websocket"]:
+            old_tabs = {tab["id"] for tab in read_debug_json(saved["port"], "/json/list")}
+            subprocess.Popen([
+                str(executable), f"--user-data-dir={profile}", "--new-window", url,
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return saved["port"], session_file, old_tabs
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    # Start the installed browser directly. A dedicated profile is required by
+    # current Chrome; default personal profiles are never read or copied.
+    process = subprocess.Popen([
+        str(executable), f"--user-data-dir={profile}",
+        "--remote-debugging-address=127.0.0.1", f"--remote-debugging-port={port}",
+        "--no-first-run", "--no-default-browser-check", "--new-window", url,
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            info = debug_endpoint(port)
+            session_file.write_text(json.dumps({
+                "port": port, "websocket": info["webSocketDebuggerUrl"],
+            }), encoding="utf-8")
+            print(f"Đã mở {name.title()} trên máy.", flush=True)
+            return port, session_file, set()
+        except (OSError, ValueError, KeyError):
+            if process.poll() is not None:
+                break
+            time.sleep(0.2)
+    raise ValueError(
+        "Không kết nối được cửa sổ Chrome/Edge của script. Đóng cửa sổ này rồi chạy lại BAT. "
+        "Nếu máy có chính sách công ty chặn kết nối trình duyệt, cần quản trị viên cho phép."
+    )
+
+
+def wait_for_manual_login(port: int, old_tabs: set[str], timeout: float = 600) -> None:
+    """Wait for Google's redirect before attaching any browser automation."""
+    print("Đăng nhập Google trong cửa sổ mới nếu được yêu cầu; script sẽ tự tiếp tục.", flush=True)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            tabs = read_debug_json(port, "/json/list")
+        except (OSError, ValueError) as exc:
+            raise ValueError("Cửa sổ đăng nhập đã đóng hoặc mất kết nối. Chạy lại BAT để tiếp tục.") from exc
+        pages = [tab for tab in tabs if tab.get("type") == "page" and tab.get("id") not in old_tabs]
+        for tab in pages:
+            parsed = urlsplit(tab.get("url", ""))
+            if parsed.scheme == "https" and parsed.netloc == "gemini.google.com":
+                return
+        if not pages:
+            # The initial tab may still be being created during browser startup.
+            if not tabs:
+                time.sleep(0.5)
+                continue
+        time.sleep(0.5)
+    raise ValueError("Hết 10 phút chờ đăng nhập Google. Chạy lại BAT để tiếp tục.")
+
+
+def close_native_browser(browser, session_file: Path) -> None:
+    # Close only our dedicated browser, allowing it to flush its saved login.
+    try:
+        session = browser.new_browser_cdp_session()
+        session.send("Browser.close")
+    except Exception:
+        pass
+    finally:
+        try:
+            browser.close()
+        except Exception:
+            pass
+        try:
+            session_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def read_browser(url: str, profile: Path) -> dict[str, str]:
     url = validate_gemini_url(url.strip())
     expected_chat = _conversation_key(url)
@@ -215,34 +357,34 @@ def read_browser(url: str, profile: Path) -> dict[str, str]:
             raise ValueError("Không cài được Playwright. Kiểm tra kết nối mạng rồi chạy lại file BAT.") from exc
     from playwright.sync_api import sync_playwright, Error as PlaywrightError
 
+    # This is Gemini's normal Google sign-in entry point. Chrome handles the
+    # login itself; Playwright connects only after the redirect back to Gemini.
+    login_url = url if expected_chat[0] == "share" else (
+        "https://accounts.google.com/ServiceLogin?" + urlencode({
+            "continue": url, "followup": url, "passive": "1209600",
+        })
+    )
+    port, session_file, old_tabs = start_native_browser(login_url, profile)
+    wait_for_manual_login(port, old_tabs)
+    endpoint = f"http://127.0.0.1:{port}"
     with sync_playwright() as playwright:
-        context = None
-        for channel in ("chrome", "msedge", "chromium"):
-            try:
-                context = playwright.chromium.launch_persistent_context(
-                    str(profile), headless=False,
-                    **({"channel": channel} if channel != "chromium" else {}),
-                )
-                break
-            except PlaywrightError:
-                continue
-        if context is None:
-            print("Lần đầu: đang cài Chromium...", flush=True)
-            try:
-                subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-                context = playwright.chromium.launch_persistent_context(str(profile), headless=False)
-            except (PlaywrightError, OSError, subprocess.CalledProcessError) as exc:
-                raise ValueError(
-                    "Không mở được trình duyệt. Đóng cửa sổ Gemini do lần chạy trước mở rồi chạy lại BAT."
-                ) from exc
         try:
-            page = context.pages[0] if context.pages else context.new_page()
+            browser = playwright.chromium.connect_over_cdp(endpoint, timeout=20000)
+        except PlaywrightError as exc:
+            raise ValueError("Không kết nối được Chrome/Edge vừa mở. Đóng cửa sổ này và chạy lại BAT.") from exc
+        context = browser.contexts[0]
+        try:
+            page = next((tab for tab in context.pages
+                         if urlsplit(tab.url).hostname == "gemini.google.com"), None)
+            if page is None:
+                page = context.new_page()
             last_navigation = time.monotonic()
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                if urlsplit(page.url).hostname != "accounts.google.com":
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
             except PlaywrightError:
                 pass
-            print("Nếu được yêu cầu, đăng nhập Google trong cửa sổ mở ra. Script sẽ tự tiếp tục.", flush=True)
+            print("Đã vào Gemini. Đang đọc chat...", flush=True)
             deadline = time.monotonic() + 600
             last_events = None
             stable_since = time.monotonic()
@@ -326,14 +468,14 @@ def read_browser(url: str, profile: Path) -> dict[str, str]:
         except PlaywrightError as exc:
             raise ValueError("Không đọc được trang Gemini. Chạy lại BAT và đăng nhập nếu cần.") from exc
         finally:
-            context.close()
+            close_native_browser(browser, session_file)
 
 
 def main() -> int:
     directory = Path(__file__).resolve().parent
     try:
         url = input("Dán link chat Gemini rồi nhấn Enter: ").strip()
-        parts = read_browser(url, directory / ".gemini-browser")
+        parts = read_browser(url, directory / ".gemini-browser-native")
         output = directory / "problem"
         write_parts(parts, output, overwrite=True)
     except (ValueError, OSError, EOFError) as exc:
