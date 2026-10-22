@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 venv/
 .polygon-browser/
+.gemini-browser/
+.gemini-export-*/
 run_state*.json
 run_state*.json.*
 result.json

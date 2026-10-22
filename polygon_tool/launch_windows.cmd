@@ -31,6 +31,7 @@ set "POLYGON_PYTHON=python"
 goto choose_action
 
 :choose_action
+if /i "%~1"=="gemini" goto copy_gemini
 if /i "%~1"=="stop" goto stop_upload
 if /i "%~1"=="check" goto check_input
 if /i "%~1"=="resume" goto resume_upload
@@ -60,6 +61,31 @@ goto show_result
 echo Đang dừng Polygon Upload và xóa checkpoint để bắt đầu bài mới...
 "%POLYGON_PYTHON%" %POLYGON_PYTHON_ARGS% -m polygon_tool.stop
 set "POLYGON_EXIT_CODE=%errorlevel%"
+goto show_result
+
+:copy_gemini
+title Gemini Export
+if not exist "gemini_export.py" goto gemini_missing
+"%POLYGON_PYTHON%" %POLYGON_PYTHON_ARGS% -c "import playwright.sync_api" >nul 2>&1
+if not errorlevel 1 goto execute_gemini
+echo Đang cài thư viện Playwright để đọc Gemini...
+"%POLYGON_PYTHON%" %POLYGON_PYTHON_ARGS% -m pip install -r requirements-browser.txt
+if errorlevel 1 goto gemini_install_failed
+
+:execute_gemini
+echo Đang sao chép Part 1–10 từ Gemini vào thư mục problem...
+echo Bộ 10 file trong problem sẽ được thay sau khi đọc và kiểm tra đủ nội dung.
+"%POLYGON_PYTHON%" %POLYGON_PYTHON_ARGS% "gemini_export.py" --output problem --overwrite
+set "POLYGON_EXIT_CODE=%errorlevel%"
+goto show_result
+
+:gemini_install_failed
+echo Không cài được Playwright. Kiểm tra kết nối mạng rồi chạy lại.
+goto done
+
+:gemini_missing
+echo Không tìm thấy gemini_export.py. Hãy giữ nguyên cấu trúc repository.
+goto done
 
 :show_result
 echo(
@@ -68,9 +94,14 @@ echo Đã hoàn tất. Xem kết quả phía trên.
 goto done
 
 :execution_failed
+if /i "%~1"=="gemini" goto gemini_failed
 if /i "%~1"=="stop" goto stop_failed
 echo Chưa hoàn tất. Hãy xem thông báo lỗi phía trên.
 echo Giữ nguyên run_state.json nếu đã có; bấm start_resume.bat để tiếp tục sau khi xử lý lỗi.
+goto done
+
+:gemini_failed
+echo Chưa xuất được 10 file. Xem lỗi phía trên; có thể dùng --from-file theo README.
 goto done
 
 :stop_failed
@@ -92,7 +123,7 @@ echo Không tìm thấy polygon_upload.py. Hãy giữ nguyên cấu trúc thư m
 goto done
 
 :invalid_action
-echo Hãy mở start.bat, start_resume.bat, start_check.bat hoặc stop.bat ở thư mục chính.
+echo Hãy mở start_copy_gemini.bat, start.bat, start_resume.bat, start_check.bat hoặc stop.bat ở thư mục chính.
 goto done
 
 :folder_error

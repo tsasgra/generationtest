@@ -2,6 +2,55 @@
 
 Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục và tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
 
+## Sao chép 10 phần từ Gemini
+
+Để lấy nội dung từ Gemini vào đúng bộ file như ảnh mẫu, bấm đúp **`start_copy_gemini.bat`**:
+
+1. Dán link cuộc trò chuyện, ví dụ `https://gemini.google.com/app/bc39f110ac308517`, rồi nhấn Enter.
+2. Script mở Chrome, Edge hoặc Chromium. Đăng nhập đúng tài khoản Google nếu cần, chờ câu trả lời hoàn tất và cuộn tới cuối câu trả lời có **Part 1–10**.
+3. Quay lại cửa sổ script, nhấn Enter. Script đọc câu trả lời cuối cùng có các tiêu đề Part và thay bộ 10 file trong `problem/`.
+4. Bấm `start_check.bat` để kiểm tra. Bấm `start.bat` khi muốn tải bài lên Polygon.
+
+Nếu đang chuyển sang bài mới sau một lần upload cũ, bấm `stop.bat` **trước** khi xuất từ Gemini để xóa checkpoint của bài trước. Export chỉ tạo các file đầu vào, không tự upload hoặc xóa checkpoint.
+
+| Phần trong Gemini | File được tạo |
+| --- | --- |
+| Part 1: Polygon Problem Name | `name problem.txt` |
+| Part 2: Statement Name | `name.txt` |
+| Part 3: Statement | `lengend.txt` |
+| Part 4: Input Format & Constraints | `input.txt` |
+| Part 5: Output Format | `output.txt` |
+| Part 6: Note (Explanation) | `note.txt` |
+| Part 7: Checker | `checker.txt` |
+| Part 8: Test Generator | `gen.txt` |
+| Part 9: Polygon FreeMarker Script | `script_sinh_test.txt` |
+| Part 10: Optimal C++ Solution | `solution.txt` |
+
+Mỗi phần cần đúng một khối code, kể cả khối trống cho Part 6. Chỉ nội dung bên trong khối được lưu; tiêu đề, nhãn Plaintext/C++, nút Copy/Download và dấu code fence không được đưa vào file. Script giữ tiếng Việt, LaTeX, `$`, backslash, thụt dòng và dấu cách trong nội dung. Hai tên phải hợp lệ với uploader; Note được để trống. Nếu thiếu/trùng phần, có nhiều khối code hoặc khối bắt buộc rỗng, script báo lỗi trước khi thay bộ file cũ. Câu trả lời mới chưa đủ phần sẽ gây lỗi; script không tự dùng câu trả lời cũ hơn.
+
+File bấm đúp tự tìm Python 3.10+ và cài Playwright nếu chưa có, dùng cùng cơ chế tìm Python như các file start khác. Chế độ trình duyệt cần phiên máy tính có giao diện. Phiên Google lưu riêng trong `.gemini-browser/`, đã được bỏ qua bởi Git. Nếu không mở được trình duyệt có sẵn, có thể cài Chromium bằng `python -m playwright install chromium`. Nếu Google không cho đăng nhập trong trình duyệt tự động hoặc giao diện Gemini thay đổi, dùng cách sao chép Markdown bên dưới.
+
+Chạy trực tiếp bằng PowerShell, dùng Python đã cài:
+
+```powershell
+py -3 -m pip install -r requirements-browser.txt
+py -3 gemini_export.py --url "https://gemini.google.com/app/bc39f110ac308517" --output problem --overwrite
+```
+
+`--channel chrome`, `--channel msedge` hoặc `--channel chromium` chọn trình duyệt cụ thể; mặc định thử lần lượt cả ba. `--browser-profile` chọn thư mục phiên riêng. Không có `--url` thì script hỏi link. `--output` mặc định là `problem`; thư mục đã tồn tại cần `--overwrite`. Để tránh xóa nhầm dữ liệu khác, thư mục được thay chỉ được chứa các tên file chuẩn trong bảng.
+
+### Xuất từ câu trả lời đã copy, không cần trình duyệt tự động
+
+Trong trình duyệt thường, dùng nút **Copy response** của toàn bộ một câu trả lời Gemini đã hoàn tất. Tạo thư mục `work` nếu chưa có, dán vào file `work/gemini_response.md` và lưu UTF-8, giữ tiêu đề `Part 1:` đến `Part 10:` cùng các code fence (ba dấu backtick hoặc dấu `~`). Không copy từng ảnh hoặc chọn cả trang chat. Chạy:
+
+```powershell
+py -3 gemini_export.py --from-file work/gemini_response.md --output problem --overwrite
+```
+
+Chế độ `--from-file` chỉ dùng thư viện chuẩn Python, không cần Playwright hoặc đăng nhập. Có thể chọn thư mục mới bằng `--output my_problem`, sau đó dùng `polygon_upload.py run --input my_problem --dry-run` để kiểm tra bộ file đó.
+
+Kiểm thử offline: `python -m unittest -v test_gemini_export`. Kiểm thử DOM dùng Playwright với trang HTML mô phỏng cấu trúc câu trả lời. Chưa kiểm thử đăng nhập hoặc đọc end-to-end trên tài khoản Gemini thật; link cuộc trò chuyện cần quyền của tài khoản Google đang đăng nhập.
+
 ## Bấm đúp để chạy trên Windows
 
 Sau khi cập nhật hoặc tải repository về máy, điền đủ 10 file trong `problem/` rồi bấm đúp một trong các file sau tại thư mục chính:
