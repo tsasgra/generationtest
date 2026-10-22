@@ -8,7 +8,7 @@ import sys
 import time
 from urllib.parse import urlsplit
 
-from .images import PreparedImage
+from .images import PreparedImage, delete_uploaded
 
 GEMINI_URL = "https://gemini.google.com/app?hl=en"
 EDITOR = 'rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]'
@@ -34,23 +34,13 @@ def validate_cdp_url(value: str) -> str:
 
 
 @contextmanager
-def open_browser(playwright, profile: Path, channel: str, cdp_url: str | None):
-    if cdp_url:
-        browser = playwright.chromium.connect_over_cdp(cdp_url)
-        if not browser.contexts:
-            raise GeminiBrowserError("Chrome CDP chưa có browser context.")
-        # The caller owns this browser; never close its context or other tabs.
-        yield browser.contexts[0]
-    else:
-        options = {} if channel == "chromium" else {"channel": channel}
-        context = playwright.chromium.launch_persistent_context(
-            str(profile.resolve()), headless=False, accept_downloads=False,
-            viewport={"width": 1280, "height": 900}, **options,
-        )
-        try:
-            yield context
-        finally:
-            context.close()
+def open_browser(playwright, cdp_url: str):
+    browser = playwright.chromium.connect_over_cdp(validate_cdp_url(cdp_url))
+    if not browser.contexts:
+        raise GeminiBrowserError("Chrome/Edge CDP chưa có browser context.")
+    # This is an installed browser started outside Playwright after manual login.
+    # Exiting sync_playwright disconnects; never close the browser or its tabs.
+    yield browser.contexts[0]
 
 
 def wait_for_editor(page, timeout: float):
@@ -189,46 +179,64 @@ def wait_for_upload(page, paths: list[Path], timeout: float):
     )
 
 
-def send_prompt(page, prompt: str, timeout: float):
+SAVED_MESSAGE = r"""({editorSelector, prompt, names}) => {
+    if (!/^\/app\/[^/]+/.test(location.pathname)) return false;
+    const editor = document.querySelector(editorSelector);
+    if (!editor || editor.innerText.trim()) return false;
+    const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+    const alerts = [...document.querySelectorAll('[role="alert"], .upload-error, .file-error')];
+    if (alerts.some(el => visible(el) && /error|failed|unable|limit|lỗi|không thể|giới hạn/i.test(el.innerText))) return false;
+    const normalize = text => text.replace(/\s+/g, ' ').trim();
+    const turns = [...document.querySelectorAll('user-query, .user-query-container, [data-message-author-role="user"]')];
+    return turns.some(turn => {
+        if (!visible(turn) || !normalize(turn.innerText).includes(normalize(prompt))) return false;
+        const attachments = [...turn.querySelectorAll(
+            'user-query-file-preview, .file-preview-container, .file-preview, .attachment-preview, img')].filter(visible);
+        const labels = attachments.flatMap(el => [el.innerText || '', ...['title', 'aria-label', 'alt']
+            .map(attr => el.getAttribute(attr) || '')]);
+        // A filename merely mentioned in the prompt is not an attachment.
+        const named = names.filter(name => labels.some(label => label.includes(name))).length;
+        const images = [...turn.querySelectorAll('img')].filter(img => visible(img) && img.complete &&
+            img.naturalWidth > 0 && !img.closest('.avatar, .profile-image') &&
+            !/avatar|profile/i.test(img.className + ' ' + img.alt));
+        const busy = [...turn.querySelectorAll('[role="progressbar"], [aria-busy="true"]')].some(visible);
+        return !busy && (named === names.length || images.length === names.length);
+    });
+}"""
+
+
+def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
     editor = page.locator(EDITOR).first
     editor.fill(prompt)
     button = page.get_by_role("button", name=SEND_NAME).first
     button.wait_for(state="visible", timeout=timeout * 1000)
     button.click(timeout=timeout * 1000)
     try:
-        page.wait_for_function(
-            "selector => /^\\/app\\/[^/]+/.test(location.pathname) && "
-            "document.querySelector(selector)?.innerText.trim() === ''",
-            arg=EDITOR, timeout=timeout * 1000,
-        )
+        arguments = {"editorSelector": EDITOR, "prompt": prompt, "names": [p.name for p in paths]}
+        page.wait_for_function(SAVED_MESSAGE, arg=arguments, timeout=timeout * 1000)
+        # A cleared composer/optimistic preview alone is not a durable upload.
+        # Require the sent images again after fetching the conversation anew.
+        page.reload(wait_until="domcontentloaded", timeout=timeout * 1000)
+        page.wait_for_function(SAVED_MESSAGE, arg=arguments, timeout=timeout * 1000)
     except Exception as exc:
         raise GeminiBrowserError(
-            "Đã bấm Gửi nhưng chưa xác nhận được chat đã lưu. "
-            "Kiểm tra tab hiện tại trước khi chạy lại để tránh gửi trùng."
+            "Đã bấm Gửi nhưng chưa xác nhận được đủ ảnh trong chat sau khi tải lại. "
+            "Giữ nguyên ảnh gốc. Kiểm tra tab hiện tại trước khi chạy lại để tránh gửi trùng."
         ) from exc
 
 
-def keep_tabs_open(pages):
-    print("Giữ các tab để bạn xem/gửi ảnh. Đóng các tab Gemini do script mở hoặc nhấn Ctrl+C để kết thúc.")
-    while any(not page.is_closed() for page in pages):
-        page = next(page for page in pages if not page.is_closed())
-        try:
-            page.wait_for_timeout(300)
-        except Exception:
-            if any(not item.is_closed() for item in pages):
-                raise
-
-
-def upload_images(images: list[PreparedImage], *, profile: Path, browser: str,
-                  cdp_url: str | None, login_timeout: float, upload_timeout: float,
-                  batch_size: int, prompt: str | None):
+def upload_images(images: list[PreparedImage], *, cdp_url: str,
+                  login_timeout: float, upload_timeout: float,
+                  batch_size: int, prompt: str, keep_images: bool = False,
+                  attach_only: bool = False):
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
     pages = []
+    kept = []
     try:
         with sync_playwright() as playwright:
-            with open_browser(playwright, profile, browser, cdp_url) as context:
-                print("Đăng nhập Google trong cửa sổ trình duyệt nếu được yêu cầu. Script không đọc mật khẩu.")
+            with open_browser(playwright, cdp_url) as context:
+                print("Đã kết nối phiên Chrome/Edge đã đăng nhập.")
                 try:
                     for start in range(0, len(images), batch_size):
                         batch = images[start:start + batch_size]
@@ -239,20 +247,22 @@ def upload_images(images: list[PreparedImage], *, profile: Path, browser: str,
                         choose_files(page, paths)
                         wait_for_upload(page, paths, upload_timeout)
                         print(f"Chat {len(pages)}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
-                        if prompt:
-                            send_prompt(page, prompt, upload_timeout)
-                            print(f"Đã gửi. Link chat: {page.url}")
-                    if not prompt:
-                        print("Ảnh đang đính kèm trong chat mới. Bạn nhập nội dung và bấm Gửi để lưu vào lịch sử.")
+                        if not attach_only:
+                            send_prompt(page, prompt, paths, upload_timeout)
+                            print(f"Đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}")
+                            if not keep_images:
+                                kept.extend(delete_uploaded(batch))
+                    if attach_only:
+                        print("Ảnh đang đính kèm, chưa gửi. Giữ nguyên toàn bộ ảnh gốc.")
                 except Exception as exc:
-                    print(f"Lỗi: {exc}\nGiữ tab để kiểm tra. Script chưa xác nhận hoàn tất.", file=sys.stderr)
-                    keep_tabs_open(pages)
+                    print(f"Lỗi: {exc}\nGiữ tab và ảnh chưa xác nhận để kiểm tra.", file=sys.stderr)
                     raise
-                keep_tabs_open(pages)
+                if kept:
+                    raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
+                print("Hoàn tất. Các tab Gemini vẫn mở; bạn có thể đóng trình duyệt khi xem xong.")
     except PlaywrightError as exc:
         raise GeminiBrowserError(
             f"Lỗi trình duyệt: {exc}\n"
-            "Cần máy có giao diện và Google Chrome, hoặc --browser msedge. "
-            "Với --browser chromium, cài bằng python -m playwright install chromium. "
-            "Nếu Google không cho đăng nhập trình duyệt tự động, dùng --cdp-url theo README.md."
+            "Đóng phiên Gemini rồi chạy --login để đăng nhập trước khi kết nối, "
+            "hoặc dùng --browser msedge. Xem README.md. Ảnh chưa xác nhận được giữ lại."
         ) from exc
