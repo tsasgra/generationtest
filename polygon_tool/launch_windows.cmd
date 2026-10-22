@@ -31,6 +31,7 @@ set "POLYGON_PYTHON=python"
 goto choose_action
 
 :choose_action
+if /i "%~1"=="stop" goto stop_upload
 if /i "%~1"=="check" goto check_input
 if /i "%~1"=="resume" goto resume_upload
 if /i not "%~1"=="auto" goto invalid_action
@@ -53,6 +54,14 @@ set "POLYGON_UPLOAD_ARGS=run --input problem --dry-run"
 echo(
 "%POLYGON_PYTHON%" %POLYGON_PYTHON_ARGS% "polygon_upload.py" %POLYGON_UPLOAD_ARGS%
 set "POLYGON_EXIT_CODE=%errorlevel%"
+goto show_result
+
+:stop_upload
+echo Đang dừng các tiến trình Polygon Upload trên máy...
+"%POLYGON_PYTHON%" %POLYGON_PYTHON_ARGS% -m polygon_tool.stop
+set "POLYGON_EXIT_CODE=%errorlevel%"
+
+:show_result
 echo(
 if not "%POLYGON_EXIT_CODE%"=="0" goto execution_failed
 echo Đã hoàn tất. Xem kết quả phía trên.
@@ -78,7 +87,7 @@ echo Không tìm thấy polygon_upload.py. Hãy giữ nguyên cấu trúc thư m
 goto done
 
 :invalid_action
-echo Hãy mở start.bat, start_resume.bat hoặc start_check.bat ở thư mục chính.
+echo Hãy mở start.bat, start_resume.bat, start_check.bat hoặc stop.bat ở thư mục chính.
 goto done
 
 :folder_error

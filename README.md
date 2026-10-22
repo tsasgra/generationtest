@@ -11,10 +11,15 @@ Sau khi cập nhật hoặc tải repository về máy, điền đủ 10 file tr
 | **`start.bat`** | Chạy upload ngay. Nếu đã có `run_state.json`, tự tiếp tục bài đó; nếu chưa có, tạo bài từ `problem/`. |
 | `start_resume.bat` | Tiếp tục bài trong `run_state.json`. Báo lỗi nếu chưa có checkpoint. |
 | `start_check.bat` | Kiểm tra đầu vào trong `problem/` bằng `--dry-run`, không gọi Polygon. |
+| **`stop.bat`** | Dừng các tiến trình uploader đang chạy trên máy cùng tiến trình con của chúng, giữ nguyên checkpoint. |
 
 Các file start tự chuyển về thư mục repository và giữ cửa sổ mở để đọc kết quả/lỗi. Chúng tìm Python **3.10 trở lên** theo thứ tự: `.venv\Scripts\python.exe`, `py -3`, rồi `python`. Nếu máy đã có Python phù hợp, bạn không cần tạo virtual environment hoặc gõ lệnh để chạy phần API. Nếu chưa có, cửa sổ sẽ hướng dẫn cài Python.
 
 Giữ nguyên cấu trúc thư mục, bao gồm `polygon_tool/launch_windows.cmd` dùng chung cho các file start. Khi tiếp tục, script dùng thư mục đầu vào đã lưu trong checkpoint. Các file start không xóa checkpoint hay tự tạo bài khác khi đã có tiến độ; nếu bài đã hoàn tất, mở lại `start.bat` sẽ kiểm tra và trả lại kết quả của bài đó. Các tùy chọn nâng cao và trình duyệt lấy link vẫn dùng các lệnh bên dưới.
+
+Để dừng, bấm đúp **`stop.bat`**. Công cụ nhận diện các lệnh Python chạy `polygon_upload.py run`, `resume` hoặc `init` (qua file start hoặc gõ trực tiếp), kiểm tra lại PID/thời điểm tạo tiến trình rồi dừng cả cây tiến trình bằng `taskkill /T /F`, bao gồm trình duyệt do lần chạy đó mở. Các bản sao repository đang chạy uploader cũng thuộc phạm vi dừng. Những chương trình Python khác không bị dừng theo tên chung `python.exe`. Các cửa sổ start đã chạy xong và đang chờ nhấn phím có thể vẫn mở.
+
+`stop.bat` không xóa input, `.env` hay checkpoint và không hoàn tác dữ liệu đã tải lên. Request hoặc package mà Polygon đã nhận có thể tiếp tục trên máy chủ. Sau khi dừng, dùng `start_resume.bat` để công cụ đối chiếu trạng thái thực tế và tiếp tục; nếu request tạo bài/build bị gián đoạn, làm theo hướng dẫn khôi phục trong phần bên dưới. File stop cần Python 3.10 trở lên và Windows PowerShell có sẵn trên máy, chạy bằng cùng tài khoản/quyền với uploader.
 
 ## Cài đặt trên Windows / PowerShell
 
