@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy a ten-part Gemini answer into the uploader's ten UTF-8 input files."""
+"""Copy a ten-part Gemini answer into ten local UTF-8 text files."""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +10,11 @@ import sys
 import tempfile
 from urllib.parse import urlsplit
 
-from polygon_tool.input import PARTS, PART_FILES, validate_names
+PARTS = (
+    "name problem", "name", "lengend", "input", "output", "note",
+    "checker", "gen", "script_sinh_test", "solution",
+)
+PART_FILES = {part: f"{part}.txt" for part in PARTS}
 
 
 _HEADING = re.compile(
@@ -81,7 +85,6 @@ def parts_from_events(events: list[dict]) -> dict[str, str]:
                 raise ValueError(f"Part {number} ({PART_FILES[name]}) không được để trống.")
             value = ""
         parts[name] = value
-    validate_names(parts)
     return parts
 
 
@@ -187,7 +190,7 @@ def read_browser(url: str, profile: Path, channel: str) -> dict[str, str]:
         from playwright.sync_api import sync_playwright, Error as PlaywrightError
     except ImportError as exc:
         raise ValueError(
-            "Cài thư viện: python -m pip install -r requirements-browser.txt"
+            "Cài thư viện: python -m pip install -r requirements.txt"
         ) from exc
     profile = profile.resolve()
     print("Đăng nhập Gemini trong cửa sổ trình duyệt vừa mở, nếu cần.")
@@ -279,10 +282,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Đã xuất đủ 10 file UTF-8 vào {args.output.resolve()}:")
     for filename in PART_FILES.values():
         print(f"  {filename}")
-    if args.output.resolve() == (Path(__file__).parent / "problem").resolve():
-        print("Bấm start_check.bat để kiểm tra, rồi start.bat khi muốn tải lên Polygon.")
-    else:
-        print(f'Kiểm tra: python polygon_upload.py run --input "{args.output}" --dry-run')
     return 0
 
 

@@ -1,2 +1,2 @@
-# Core CLI uses only the Python standard library (Python 3.10+).
-# Optional browser URL fallback: pip install -r requirements-browser.txt
+# Browser export dependency; --from-file uses only the Python standard library.
+playwright>=1.48,<2

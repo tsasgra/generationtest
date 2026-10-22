@@ -9,10 +9,14 @@ import unittest
 from unittest.mock import patch
 
 from gemini_export import (
-    DOM_RESPONSES, _conversation_key, main, parse_response, parts_from_events,
+    DOM_RESPONSES, PARTS, PART_FILES, _conversation_key, main, parse_response, parts_from_events,
     validate_gemini_url, write_parts,
 )
-from polygon_tool.input import PARTS, PART_FILES, parse_directory
+
+
+def read_export(directory: Path) -> dict[str, str]:
+    return {part: (directory / filename).read_bytes().decode("utf-8")
+            for part, filename in PART_FILES.items()}
 
 
 def sample_parts() -> dict[str, str]:
@@ -62,13 +66,12 @@ class ExportTests(unittest.TestCase):
             with self.subTest(value=value[-70:]), self.assertRaises(ValueError):
                 parse_response(value)
 
-    def test_invalid_name_is_not_rewritten(self):
+    def test_name_is_copied_without_upload_rules(self):
         parts = sample_parts()
-        parts["name problem"] = "Invalid Slug"
-        with self.assertRaises(ValueError):
-            parse_response(markdown(parts))
+        parts["name problem"] = "Tên bài có dấu và khoảng trắng"
+        self.assertEqual(parse_response(markdown(parts)), parts)
 
-    def test_write_exact_ten_files_and_uploader_compatibility(self):
+    def test_write_exact_ten_files(self):
         parts = sample_parts()
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "problem"
@@ -76,12 +79,12 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in output.iterdir()), sorted(PART_FILES.values()))
             for name, filename in PART_FILES.items():
                 self.assertEqual((output / filename).read_bytes(), parts[name].encode("utf-8"))
-            self.assertEqual(parse_directory(output), parts)
+            self.assertEqual(read_export(output), parts)
             with self.assertRaises(ValueError):
                 write_parts(parts, output)
             parts["name"] = "Tên mới"
             write_parts(parts, output, overwrite=True)
-            self.assertEqual(parse_directory(output), parts)
+            self.assertEqual(read_export(output), parts)
 
     def test_reject_foreign_files_and_restore_if_publish_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -100,7 +103,7 @@ class ExportTests(unittest.TestCase):
 
             with patch.object(Path, "rename", fail_publish), self.assertRaises(OSError):
                 write_parts(sample_parts(), output, overwrite=True)
-            self.assertEqual(parse_directory(output), sample_parts())
+            self.assertEqual(read_export(output), sample_parts())
 
     def test_cli_invalid_response_does_not_modify_existing_files(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -109,7 +112,7 @@ class ExportTests(unittest.TestCase):
             source = Path(temporary) / "response.md"
             source.write_text("Part 1: incomplete", encoding="utf-8")
             self.assertEqual(main(["--from-file", str(source), "--output", str(output), "--overwrite"]), 1)
-            self.assertEqual(parse_directory(output), sample_parts())
+            self.assertEqual(read_export(output), sample_parts())
 
     def test_failed_rollback_retains_previous_files(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -126,7 +129,7 @@ class ExportTests(unittest.TestCase):
                 write_parts(sample_parts(), output, overwrite=True)
             backups = list(Path(temporary).glob(".gemini-export-*/previous"))
             self.assertEqual(len(backups), 1)
-            self.assertEqual(parse_directory(backups[0]), sample_parts())
+            self.assertEqual(read_export(backups[0]), sample_parts())
 
     def test_url_identity_after_google_account_redirect(self):
         self.assertEqual(_conversation_key("https://gemini.google.com/app/abc123"),
