@@ -136,6 +136,22 @@ def is_tool_browser(process: dict, roots: set[Path]) -> bool:
     }
 
 
+def browser_targets(processes: list[dict], roots: set[Path]) -> list[dict]:
+    groups: dict[str, list[dict]] = {}
+    for process in processes:
+        if is_tool_browser(process, roots):
+            arguments = windows_args(process.get("CommandLine") or "")[1:]
+            groups.setdefault(path_key(option(arguments, "--user-data-dir")), []).append(process)
+    targets = []
+    for group in groups.values():
+        parents = [row for row in group if option(
+            windows_args(row.get("CommandLine") or "")[1:], "--type") is None]
+        # taskkill /T on the browser parent also handles its renderer/helpers.
+        # Only enumerate helpers separately when the browser parent has gone.
+        targets.extend(parents or group)
+    return targets
+
+
 def list_processes() -> list[dict]:
     result = subprocess.run(
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", PROCESS_QUERY],
@@ -180,11 +196,17 @@ def stop_all(directory: Path, extra: list[Path]) -> tuple[int, set[Path]]:
         processes = list_processes()
         roots.update(profile_roots(directory, processes, extra))
         tools = [row for row in processes if is_tool_process(row, directory)]
-        browsers = [row for row in processes if is_tool_browser(row, roots)]
+        for target in tools:
+            stopped += terminate_tree(target)
+        if tools:
+            # The uploader may already have closed Chrome during cooperative
+            # cancellation, or taskkill /T may have removed the whole tree.
+            processes = list_processes()
+        browsers = browser_targets(processes, roots)
+        for target in browsers:
+            stopped += terminate_tree(target)
         if not tools and not browsers:
             return stopped, roots
-        for target in tools + browsers:
-            stopped += terminate_tree(target)
     processes = list_processes()
     if any(is_tool_process(row, directory) or is_tool_browser(row, roots) for row in processes):
         raise RuntimeError("Vẫn còn tiến trình của công cụ; chưa xóa trạng thái. Bấm Stop lại.")
@@ -235,12 +257,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         request_stop(ROOT)
+        print("Đã gửi yêu cầu Stop. Đang đóng uploader và trình duyệt của công cụ...", flush=True)
         stopped, roots = stop_all(ROOT, args.profile)
         removed = reset_connections(roots)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"Lỗi khi dừng/dọn trạng thái: {exc}", file=sys.stderr)
         return 1
-    print(f"Đã dừng {stopped} tiến trình gốc của uploader/cài đặt/trình duyệt cùng các tiến trình con.")
+    print(f"Đã hoàn tất Stop; không còn tiến trình của công cụ (dừng cưỡng bức {stopped} tiến trình gốc).")
     print(f"Đã xóa {removed} file trạng thái kết nối/checkpoint cục bộ.")
     print("Giữ nguyên ảnh trong img và phiên đăng nhập Google. Bấm start_gemini.bat để chạy lại.")
     print("Tin nhắn Gemini đã nhận vẫn tồn tại; Stop không thu hồi ảnh đã gửi.")

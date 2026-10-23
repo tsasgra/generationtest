@@ -9,6 +9,7 @@ import sys
 import tempfile
 
 from gemini_tool.browser import GeminiBrowserError, upload_images
+from gemini_tool.control import StopRequested, check_stop
 from gemini_tool.images import ImageInputError, collect_images, prepare_images
 from gemini_tool.native import find_system_browser
 
@@ -48,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Profile: {(args.profile / name).resolve()}")
             print("Đăng nhập trực tiếp trước, kết nối Playwright sau khi quay về Gemini.")
             return 0
+        check_stop()
         files = collect_images(args.input.resolve(), args.recursive)
         # Validate every image before creating any chats. Temp files stay alive
         # until the browser workflow ends and are removed on success or failure.
@@ -72,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError as exc:
         print(f"Thiếu thư viện ({exc.name}). Chạy: python -m pip install -r requirements-gemini.txt", file=sys.stderr)
         return 1
+    except StopRequested:
+        print("\nĐã dừng uploader theo yêu cầu Stop. Ảnh chưa xác nhận được giữ lại.", file=sys.stderr)
+        return 130
     except KeyboardInterrupt:
         print("\nĐã dừng. Ảnh chưa xác nhận được giữ lại; các chat đã gửi vẫn tồn tại trên Gemini.", file=sys.stderr)
         return 130

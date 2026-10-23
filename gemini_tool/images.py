@@ -10,6 +10,8 @@ import stat
 import sys
 import warnings
 
+from .control import check_stop
+
 
 class ImageInputError(ValueError):
     """An input cannot be safely decoded or uploaded."""
@@ -89,6 +91,7 @@ def snapshot_source(source: Path, target: Path) -> SourceSnapshot:
     digest = hashlib.sha256()
     with source.open("rb") as stream, target.open("wb") as copy:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
+            check_stop()
             digest.update(block)
             copy.write(block)
     after = source.lstat()
@@ -106,6 +109,7 @@ def prepare_images(files: list[Path], destination: Path,
     destination.mkdir(parents=True, exist_ok=True)
     prepared = []
     for index, source in enumerate(files, 1):
+        check_stop()
         original_copy = destination / f".source-{index:04d}"
         try:
             snapshot = snapshot_source(source, original_copy)
@@ -161,6 +165,7 @@ def delete_uploaded(images: list[PreparedImage]) -> list[str]:
     """
     kept = []
     for item in images:
+        check_stop()
         try:
             if not item.complete:
                 raise ImageInputError("chỉ tải khung/trang đầu, cần giữ bản gốc nhiều khung/trang")

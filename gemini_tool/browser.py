@@ -8,6 +8,7 @@ import sys
 import time
 from urllib.parse import urlencode, urlsplit
 
+from .control import check_stop
 from .images import PreparedImage, delete_uploaded
 from .native import close_native_browser, start_native_browser, wait_for_manual_login
 
@@ -27,6 +28,7 @@ UPLOAD_MENU = '[role="menu"], .cdk-overlay-container, .mat-mdc-menu-panel, [data
 SEND_NAME = re.compile(r"^(send|send message|submit|gửi|gửi tin nhắn)(\s.*)?$", re.I)
 ACCOUNT_NAME = re.compile(r"^(Google Account|Tài khoản Google)(\s*:|\s*$)", re.I)
 SIGN_IN_NAME = re.compile(r"^\s*(sign in|đăng nhập)\s*$", re.I)
+NEW_CHAT_NAME = re.compile(r"^\s*(?:new chat|cuộc trò chuyện mới|đoạn chat mới|chat mới)(?:\s*\(.*\))?\s*$", re.I)
 
 
 class GeminiBrowserError(RuntimeError):
@@ -38,6 +40,7 @@ def open_browser(profile: Path, login_timeout: float):
     """Use copy_info_on_gemini's native login before connecting automation."""
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
+    check_stop()
     login_url = "https://accounts.google.com/ServiceLogin?" + urlencode({
         "continue": GEMINI_URL, "followup": GEMINI_URL, "passive": "1209600",
     })
@@ -49,8 +52,9 @@ def open_browser(profile: Path, login_timeout: float):
     # Do not start the Playwright driver or attach CDP during Google sign-in.
     with sync_playwright() as playwright:
         try:
-            browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=20000)
+            browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=5000)
         except PlaywrightError as exc:
+            check_stop()
             raise GeminiBrowserError(
                 "Không kết nối được Chrome/Edge vừa đăng nhập. Đóng cửa sổ của script rồi chạy lại. "
                 "Chưa tải hoặc xóa ảnh."
@@ -68,6 +72,7 @@ def wait_for_editor(page, timeout: float):
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        check_stop()
         if page.is_closed():
             raise GeminiBrowserError("Tab Gemini đã đóng trước khi sẵn sàng.")
         try:
@@ -97,18 +102,59 @@ def wait_for_editor(page, timeout: float):
     )
 
 
+NEW_CHAT_STATE = r"""editorSelector => {
+    const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+    const editor = [...document.querySelectorAll(editorSelector)].find(visible);
+    const root = editor?.closest('input-container, .input-area-container, .input-container, form');
+    const text = (editor?.innerText || '').replace(/[\u200b-\u200d\u2060\ufeff]/g, '').trim();
+    const messages = [...document.querySelectorAll(
+        'user-query, .user-query-container, [data-message-author-role="user"]')].filter(visible).length;
+    const attachments = root ? [...root.querySelectorAll(
+        'uploader-preview, .file-preview-container, .upload-preview, .attachment-preview')].filter(visible).length : 0;
+    return {home: location.hostname === 'gemini.google.com' && /^\/(?:u\/\d+\/)?app\/?$/.test(location.pathname),
+        empty: !!editor && editor.isContentEditable && !text && !messages && !attachments};
+}"""
+
+
 def new_chat(page, timeout: float):
-    page.goto(GEMINI_URL, wait_until="domcontentloaded", timeout=60000)
+    from playwright.sync_api import Error as PlaywrightError
+
+    check_stop()
+    page.goto(GEMINI_URL, wait_until="commit", timeout=min(10000, timeout * 1000))
+    deadline = time.monotonic() + timeout
     wait_for_editor(page, timeout)
-    # A login redirect can restore an old conversation. Navigate again once
-    # authenticated and require the blank /app composer before attaching files.
-    page.goto(GEMINI_URL, wait_until="domcontentloaded", timeout=60000)
-    editor = wait_for_editor(page, timeout)
-    if (urlsplit(page.url).path.rstrip("/") != "/app"
-            or editor.inner_text().strip()
-            or page.locator("user-query").count()):
-        raise GeminiBrowserError("Không xác minh được chat mới trống; chưa tải ảnh vào chat này.")
-    return page
+    stable_since = None
+    requested = False
+    while time.monotonic() < deadline:
+        check_stop()
+        try:
+            state = page.evaluate(NEW_CHAT_STATE, EDITOR)
+        except PlaywrightError as exc:
+            if page.is_closed():
+                raise GeminiBrowserError("Tab Gemini đã đóng khi đang mở chat mới.") from exc
+            # Account redirects can replace the document after the editor
+            # first appears. Wait for the next document before confirming it.
+            stable_since = None
+            page.wait_for_timeout(100)
+            continue
+        if state["home"] and state["empty"]:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            if time.monotonic() - stable_since >= 1:
+                return page
+        else:
+            stable_since = None
+            if not requested:
+                button = _first_ready(page.get_by_role("button", name=NEW_CHAT_NAME).or_(
+                    page.get_by_role("link", name=NEW_CHAT_NAME)))
+                if button is not None:
+                    button.click(timeout=min(3000, max(1, (deadline - time.monotonic()) * 1000)))
+                    requested = True
+        page.wait_for_timeout(100)
+    raise GeminiBrowserError(
+        f"Hết thời gian chờ chat mới trống tại {urlsplit(page.url).path}. "
+        "Chưa tải ảnh; kiểm tra nút New chat và nội dung đang có trong ô soạn thảo."
+    )
 
 
 def _file_input(root):
@@ -175,6 +221,7 @@ def choose_files(page, paths: list[Path], timeout: float = 15):
     try:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            check_stop()
             if choosers:
                 choosers[-1].set_files(values)
                 return
@@ -241,7 +288,9 @@ ATTACHMENT_STATE = r"""({editorSelector, names}) => {
         topPreviews.some(el => (el.innerText || '').includes(name))).length;
     const removers = query('button[aria-label]').filter(el =>
         /^(remove|delete|xóa|gỡ)\s.*(file|image|attachment|tệp|ảnh)/i.test(el.getAttribute('aria-label')));
-    const thumbnails = query('img').filter(el => !el.closest('button, .avatar, .profile-image') && !editor.contains(el));
+    const thumbnails = query('img').filter(el => !el.closest('button, .avatar, .profile-image') && !editor.contains(el)
+        && (topPreviews.length ? topPreviews.some(preview => preview.contains(el)) :
+            names.some(name => (el.alt || '').includes(name))));
     const loaded = img => img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
     // Some layouts use a CSS background for the thumbnail instead of <img>.
     // Decode it as well; the filename/preview shell alone is never readiness.
@@ -260,20 +309,22 @@ ATTACHMENT_STATE = r"""({editorSelector, names}) => {
         }
         return loaded(cached.image);
     });
-    const loadingStatus = query('[role="status"], [aria-live]').filter(el =>
+    const loadingStatus = [...document.querySelectorAll('[role="status"], [aria-live]:not([aria-live="off"])')].filter(visible).filter(el =>
         !editor.contains(el) && !el.contains(editor)).some(el =>
         /uploading|loading|processing|đang tải|đang xử lý/i.test(el.innerText || ''));
     const busySelector = '[role="progressbar"], mat-progress-spinner, mat-spinner, [aria-busy="true"], ' +
         '.uploading, .loading, [data-upload-state="uploading"], [data-upload-state="pending"], ' +
-        '[data-state="uploading"], [data-state="loading"]';
+        '[data-upload-state="processing"], [data-upload-state="loading"], [data-upload-state="queued"], ' +
+        '[data-state="uploading"], [data-state="loading"], [data-state="processing"]';
+    const portalProgress = [...document.querySelectorAll('[role="progressbar"], mat-spinner, mat-progress-spinner')].some(visible);
     const errors = [...document.querySelectorAll('[role="alert"], .upload-error, .file-error')]
         .filter(visible).map(el => el.innerText).filter(value =>
         /error|failed|couldn.t|unable|limit|too many|too large|unsupported|lỗi|không thể|giới hạn|quá lớn/i.test(value));
     return {
         count: Math.max(named, topPreviews.length, removers.length),
-        ready: thumbnails.length + backgrounds.length >= names.length &&
+        ready: thumbnails.length + backgrounds.length === names.length &&
             thumbnails.every(loaded) && backgrounds.every(Boolean),
-        busy: root.matches(busySelector) || query(busySelector).length > 0 || loadingStatus,
+        busy: root.matches(busySelector) || query(busySelector).length > 0 || loadingStatus || portalProgress,
         error: errors.join('\n')
     };
 }"""
@@ -283,6 +334,7 @@ def wait_for_upload(page, paths: list[Path], timeout: float, *, require_send: bo
     deadline = time.monotonic() + timeout
     stable_since = None
     while time.monotonic() < deadline:
+        check_stop()
         state = page.evaluate(ATTACHMENT_STATE, {
             "editorSelector": EDITOR, "names": [p.name for p in paths],
         })
@@ -297,7 +349,7 @@ def wait_for_upload(page, paths: list[Path], timeout: float, *, require_send: bo
                 and (not require_send or button is not None)):
             if stable_since is None:
                 stable_since = time.monotonic()
-            if time.monotonic() - stable_since >= 1:
+            if time.monotonic() - stable_since >= 2:
                 return button
         else:
             stable_since = None
@@ -309,7 +361,8 @@ def wait_for_upload(page, paths: list[Path], timeout: float, *, require_send: bo
 
 
 SAVED_MESSAGE = r"""({editorSelector, prompt, names}) => {
-    if (!/^\/app\/[^/]+/.test(location.pathname)) return false;
+    if (location.hostname !== 'gemini.google.com') return false;
+    if (!/^\/(?:u\/\d+\/)?app\/[^/]+\/?$/.test(location.pathname)) return false;
     const editor = document.querySelector(editorSelector);
     if (!editor || editor.innerText.trim()) return false;
     const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
@@ -334,20 +387,32 @@ SAVED_MESSAGE = r"""({editorSelector, prompt, names}) => {
 }"""
 
 
+def wait_for_saved_message(page, arguments: dict, timeout: float):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        check_stop()
+        if page.evaluate(SAVED_MESSAGE, arguments):
+            return
+        page.wait_for_timeout(100)
+    raise GeminiBrowserError("Hết thời gian xác nhận ảnh trong chat đã lưu.")
+
+
 def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
+    check_stop()
     editor = page.locator(EDITOR).first
     editor.fill(prompt)
     # Filling the prompt can update the composer. Recheck the attachments and
     # enabled Send control together before clicking, even when called directly.
     button = wait_for_upload(page, paths, timeout, require_send=True)
-    button.click(timeout=timeout * 1000)
+    check_stop()
+    button.click(timeout=min(3000, timeout * 1000))
     try:
         arguments = {"editorSelector": EDITOR, "prompt": prompt, "names": [p.name for p in paths]}
-        page.wait_for_function(SAVED_MESSAGE, arg=arguments, timeout=timeout * 1000)
+        wait_for_saved_message(page, arguments, timeout)
         # A cleared composer/optimistic preview alone is not a durable upload.
         # Require the sent images again after fetching the conversation anew.
-        page.reload(wait_until="domcontentloaded", timeout=timeout * 1000)
-        page.wait_for_function(SAVED_MESSAGE, arg=arguments, timeout=timeout * 1000)
+        page.reload(wait_until="commit", timeout=min(10000, timeout * 1000))
+        wait_for_saved_message(page, arguments, timeout)
     except Exception as exc:
         raise GeminiBrowserError(
             "Đã bấm Gửi nhưng chưa xác nhận được đủ ảnh trong chat sau khi tải lại. "
@@ -358,6 +423,7 @@ def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
 def keep_tabs_open(pages):
     print("Đóng các tab Gemini do script mở hoặc nhấn Ctrl+C khi xem xong.")
     while any(not page.is_closed() for page in pages):
+        check_stop()
         page = next(page for page in pages if not page.is_closed())
         try:
             page.wait_for_timeout(300)
@@ -380,6 +446,7 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
             print(f"Phiên đăng nhập lưu trong {profile.resolve()}.")
             try:
                 for start in range(0, len(images), batch_size):
+                    check_stop()
                     batch = images[start:start + batch_size]
                     # Reuse the launcher's empty tab, preserving any restored chats.
                     if not pages and context.pages and context.pages[0].url == "about:blank":
@@ -410,6 +477,7 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
             print("Hoàn tất. Các tab Gemini vẫn mở để bạn xem kết quả.")
             keep_tabs_open(pages)
     except PlaywrightError as exc:
+        check_stop()
         raise GeminiBrowserError(
             f"Lỗi trình duyệt: {exc}\n"
             "Đóng cửa sổ của script rồi chạy lại start_gemini.bat. "

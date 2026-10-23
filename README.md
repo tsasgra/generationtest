@@ -19,6 +19,11 @@ không được đưa lên GitHub và không tạo tùy chọn bỏ qua đăng n
    chọn ảnh, chờ tải xong rồi mới submit, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
 5. Xem kết quả rồi đóng các tab Gemini do script mở hoặc nhấn Ctrl+C.
 
+Script chờ giao diện chat mới ổn định, hỗ trợ cả `/app` và đường dẫn theo tài khoản
+như `/u/0/app`. Nếu Gemini khôi phục chat cũ, script bấm **New chat** rồi chờ chat
+trống trước khi thêm ảnh. Nội dung lịch sử ẩn và ký tự trắng của trình soạn thảo
+không bị tính nhầm thành một cuộc trò chuyện đang có nội dung.
+
 Lần sau chỉ cần thêm ảnh vào `img` và chạy lại. Phiên đăng nhập được giữ trong
 `.gemini-browser-native/chrome` hoặc `.gemini-browser-native/edge`, giống nhánh `copy_info_on_gemini`.
 Không chạy hai bản script cùng lúc hoặc chỉnh sửa/di chuyển ảnh khi đang chạy.
@@ -31,6 +36,12 @@ không tự chạy tiếp sang bước tải ảnh. Sau khi dừng thành công,
 `gemini-export-session.json` trong các profile riêng để lần sau mở kết nối mới.
 Nhánh này chưa có checkpoint tiếp tục upload; đây là trạng thái kết nối cục bộ.
 File trạng thái hỏng hoặc còn lại sau khi uploader đã thoát cũng được dọn.
+
+Uploader đọc tín hiệu Stop trong lúc chờ đăng nhập, mở chat, tải ảnh, xác nhận tin
+nhắn và giữ tab khi có lỗi. Khi nhận Stop, uploader thoát các vòng chờ, đóng phiên
+trình duyệt tự động và dọn ảnh chuyển đổi tạm. Stop dùng `taskkill` để dừng tiến
+trình còn sót, xử lý cây Chrome/Edge qua tiến trình cha để tránh kiểm tra lặp lại
+từng renderer đã đóng. Cửa sổ Stop in tiến độ ngay khi gửi yêu cầu dừng.
 
 **Giữ nguyên ảnh trong `img/`, mã nguồn, thư viện đã cài và phiên đăng nhập Google.**
 Stop không xóa lịch sử chat hoặc thu hồi ảnh mà Gemini đã nhận. Các cửa sổ BAT
@@ -93,7 +104,8 @@ Mỗi nhóm tối đa **10 ảnh** được gửi vào một chat mới, kèm n�
 `apply polygon setter skill`, chỉ đúng một dòng này, không thêm nội dung khác.
 Trước khi bấm Gửi/submit, script phải thấy đủ
 ảnh xem trước đã tải được, không còn tiến trình/trạng thái đang tải hoặc xử lý và
-nút Gửi đang bật. Các điều kiện phải ổn định ít nhất một giây. Script kiểm tra lại
+nút Gửi đang bật. Cả trạng thái tải trong ô soạn thảo lẫn thanh tiến trình/thông báo
+tải bên ngoài đều phải kết thúc. Các điều kiện phải ổn định ít nhất **hai giây**. Script kiểm tra lại
 sau khi điền nội dung gửi kèm; chỉ thấy tên file chưa đủ để submit. Nếu hết
 `--upload-timeout`, script báo lỗi và giữ ảnh, không cố bấm Gửi.
 
@@ -166,6 +178,9 @@ chế độ chỉ đính kèm và việc giữ/xóa đúng ảnh gốc. File ki�
 
 Kiểm thử Stop mô phỏng việc dừng đúng cây tiến trình/profile, PID bị tái sử dụng,
 lỗi quyền truy cập, dọn trạng thái hỏng và giữ ảnh cùng dữ liệu đăng nhập.
+Đã chạy tiến trình uploader riêng với Chromium thật và trang Gemini mô phỏng:
+Stop trong lúc chờ tải ảnh hoặc giữ tab do lỗi đều đóng trình duyệt, xóa ảnh tạm,
+giữ ảnh gốc và trả mã dừng 130 mà không cần cưỡng bức tiến trình thử nghiệm.
 Phần dừng tiến trình Windows chưa được chạy trực tiếp trên Windows thật.
 
 Script test cục bộ đã truy cập Gemini thật ở phiên khách: ảnh vào vùng xem trước

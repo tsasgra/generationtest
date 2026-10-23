@@ -16,6 +16,8 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, build_opener
 
+from .control import check_stop, sleep
+
 def find_system_browser() -> tuple[str, Path]:
     """Use the installed, supported browser and its normal login UI."""
     for name, executable, relative in (
@@ -78,6 +80,7 @@ def debug_endpoint(port: int) -> dict:
     return info
 
 def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[str]]:
+    check_stop()
     name, executable = find_system_browser()
     profile = (profile_root / name).resolve()
     profile.mkdir(parents=True, exist_ok=True)
@@ -106,6 +109,7 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
+        check_stop()
         try:
             info = debug_endpoint(port)
             session_file.write_text(json.dumps({
@@ -116,7 +120,7 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
         except (OSError, ValueError, KeyError):
             if process.poll() is not None:
                 break
-            time.sleep(0.2)
+            sleep(0.2)
     raise ValueError(
         "Không kết nối được cửa sổ Chrome/Edge của script. Đóng cửa sổ này rồi chạy lại BAT. "
         "Nếu máy có chính sách công ty chặn kết nối trình duyệt, cần quản trị viên cho phép."
@@ -127,6 +131,7 @@ def wait_for_manual_login(port: int, old_tabs: set[str], timeout: float = 600) -
     print("Đăng nhập Google trong cửa sổ mới nếu được yêu cầu; script sẽ tự tiếp tục.", flush=True)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        check_stop()
         try:
             tabs = read_debug_json(port, "/json/list")
         except (OSError, ValueError) as exc:
@@ -144,9 +149,9 @@ def wait_for_manual_login(port: int, old_tabs: set[str], timeout: float = 600) -
         if not pages:
             # The initial tab may still be being created during browser startup.
             if not tabs:
-                time.sleep(0.5)
+                sleep(0.5)
                 continue
-        time.sleep(0.5)
+        sleep(0.5)
     raise ValueError(f"Hết {timeout:g} giây chờ đăng nhập Google. Chạy lại BAT để tiếp tục.")
 
 def close_native_browser(browser, session_file: Path) -> None:
