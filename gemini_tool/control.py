@@ -2,9 +2,77 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import ExitStack, contextmanager
+import os
 import time
 
-STOP_FILE = Path(__file__).resolve().parent.parent / ".gemini-stop-request"
+ROOT = Path(__file__).resolve().parent.parent
+STOP_FILE = ROOT / ".gemini-stop-request"
+RUNTIME = ROOT / ".gemini-runtime"
+
+
+class AlreadyRunning(ValueError):
+    """Another uploader or Stop owns the requested operation."""
+
+
+@contextmanager
+def exclusive_lock(path: Path, timeout: float = 0):
+    """Kernel-owned lock: a killed process cannot leave a stale busy flag."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as stream:
+        stream.seek(0, os.SEEK_END)
+        if not stream.tell():
+            stream.write(b"0")
+            stream.flush()
+        stream.seek(0)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise AlreadyRunning(
+                        "Công cụ đang chạy hoặc Stop đang dọn dữ liệu. "
+                        "Chờ Stop hoàn tất rồi mở lại start_gemini.bat."
+                    ) from exc
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+@contextmanager
+def upload_run():
+    # Start cannot enter while Stop is resetting a profile. Keep the uploader
+    # lock through browser shutdown and temporary-file removal.
+    with ExitStack() as stack:
+        with exclusive_lock(ROOT / ".gemini-reset.lock"):
+            stack.enter_context(exclusive_lock(ROOT / ".gemini-upload.lock"))
+        check_stop()
+        yield
+
+
+@contextmanager
+def start_run():
+    with ExitStack() as stack:
+        with exclusive_lock(ROOT / ".gemini-reset.lock"):
+            stack.enter_context(exclusive_lock(ROOT / ".gemini-launch.lock"))
+            # An older uploader must finish unwinding before cancellation is
+            # cleared. Hold the launch lock through setup and the child run.
+            with exclusive_lock(ROOT / ".gemini-upload.lock"):
+                STOP_FILE.unlink(missing_ok=True)
+        yield
 
 
 class StopRequested(KeyboardInterrupt):

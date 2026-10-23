@@ -9,9 +9,10 @@ import sys
 import tempfile
 
 from gemini_tool.browser import GeminiBrowserError, upload_images
-from gemini_tool.control import StopRequested, check_stop
+from gemini_tool.control import RUNTIME, StopRequested, check_stop, upload_run
 from gemini_tool.images import ImageInputError, collect_images, prepare_images
 from gemini_tool.native import find_system_browser
+from gemini_tool.state import remember_profile
 
 ROOT = Path(__file__).resolve().parent
 
@@ -49,24 +50,28 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Profile: {(args.profile / name).resolve()}")
             print("Đăng nhập trực tiếp trước, kết nối Playwright sau khi quay về Gemini.")
             return 0
-        check_stop()
-        files = collect_images(args.input.resolve(), args.recursive)
-        # Validate every image before creating any chats. Temp files stay alive
-        # until the browser workflow ends and are removed on success or failure.
-        with tempfile.TemporaryDirectory(prefix="gemini-upload-") as directory:
-            images = prepare_images(files, Path(directory), args.max_file_mb, skip_invalid=True)
-            for item in images:
-                print(f"{item.source.name} → {item.upload.name}: {item.note}")
-            print(f"{len(images)} ảnh; {(len(images) + args.batch_size - 1) // args.batch_size} chat mới.")
-            if args.dry_run:
-                print("Kiểm tra offline thành công. Chưa mở Gemini hoặc tải ảnh lên mạng.")
-                return 0
-            upload_images(
-                images, profile=args.profile,
-                login_timeout=args.login_timeout, upload_timeout=args.upload_timeout,
-                batch_size=args.batch_size, prompt=args.prompt,
-                keep_images=args.keep_images, attach_only=args.attach_only,
-            )
+        with upload_run():
+            for selected in (args.profile, args.input):
+                if selected.resolve().is_relative_to(RUNTIME.resolve()):
+                    raise ValueError("Không đặt ảnh gốc hoặc profile đăng nhập trong .gemini-runtime (thư mục tạm).")
+            files = collect_images(args.input.resolve(), args.recursive)
+            remember_profile(RUNTIME, args.profile)
+            # A forced Windows Stop bypasses Python's finally blocks. Keep all
+            # prepared files in a known owned directory that Stop can remove.
+            with tempfile.TemporaryDirectory(prefix="upload-", dir=RUNTIME) as directory:
+                images = prepare_images(files, Path(directory), args.max_file_mb, skip_invalid=True)
+                for item in images:
+                    print(f"{item.source.name} → {item.upload.name}: {item.note}")
+                print(f"{len(images)} ảnh; {(len(images) + args.batch_size - 1) // args.batch_size} chat mới.")
+                if args.dry_run:
+                    print("Kiểm tra offline thành công. Chưa mở Gemini hoặc tải ảnh lên mạng.")
+                    return 0
+                upload_images(
+                    images, profile=args.profile,
+                    login_timeout=args.login_timeout, upload_timeout=args.upload_timeout,
+                    batch_size=args.batch_size, prompt=args.prompt,
+                    keep_images=args.keep_images, attach_only=args.attach_only,
+                )
         return 0
     except (ImageInputError, GeminiBrowserError, ValueError, OSError) as exc:
         print(f"Lỗi: {exc}", file=sys.stderr)

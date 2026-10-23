@@ -17,6 +17,9 @@ from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, build_opener
 
 from .control import check_stop, sleep
+from .state import reset_browser_state
+
+_ACTIVE_BROWSERS: dict[Path, subprocess.Popen] = {}
 
 def find_system_browser() -> tuple[str, Path]:
     """Use the installed, supported browser and its normal login UI."""
@@ -85,18 +88,18 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
     profile = (profile_root / name).resolve()
     profile.mkdir(parents=True, exist_ok=True)
     session_file = profile / "gemini-export-session.json"
-    # Reuse only the exact browser instance previously started by this tool.
+    # A new run must never attach to an older run's browser. Its late cleanup
+    # could close this run's tabs/context, producing TargetClosedError.
+    running = False
     try:
         saved = json.loads(session_file.read_text(encoding="utf-8"))
         info = debug_endpoint(saved["port"])
-        if info["webSocketDebuggerUrl"] == saved["websocket"]:
-            old_tabs = {tab["id"] for tab in read_debug_json(saved["port"], "/json/list")}
-            subprocess.Popen([
-                str(executable), f"--user-data-dir={profile}", "--new-window", url,
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return saved["port"], session_file, old_tabs
+        running = info["webSocketDebuggerUrl"] == saved["websocket"]
     except (OSError, ValueError, KeyError, TypeError):
         pass
+    if running:
+        raise ValueError("Trình duyệt của lần chạy trước vẫn mở. Chạy stop.bat và chờ dọn xong trước khi Start.")
+    reset_browser_state(profile)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -107,6 +110,7 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
         "--remote-debugging-address=127.0.0.1", f"--remote-debugging-port={port}",
         "--no-first-run", "--no-default-browser-check", "--new-window", url,
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _ACTIVE_BROWSERS[session_file] = process
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         check_stop()
@@ -154,19 +158,40 @@ def wait_for_manual_login(port: int, old_tabs: set[str], timeout: float = 600) -
         sleep(0.5)
     raise ValueError(f"Hết {timeout:g} giây chờ đăng nhập Google. Chạy lại BAT để tiếp tục.")
 
-def close_native_browser(browser, session_file: Path) -> None:
-    # Close only our dedicated browser, allowing it to flush its saved login.
+def request_browser_close(session_file: Path) -> None:
+    """Send an owned local CDP close with a bounded transport, without waiting
+    for an acknowledgement from a browser which is shutting down.
+    """
+    from websocket import create_connection
+
+    saved = json.loads(session_file.read_text(encoding="utf-8"))
+    info = debug_endpoint(saved["port"])
+    if info["webSocketDebuggerUrl"] != saved["websocket"]:
+        raise ValueError("Kết nối đã đổi; không đóng trình duyệt khác.")
+    connection = create_connection(saved["websocket"], timeout=2, suppress_origin=True,
+                                   http_no_proxy=["127.0.0.1", "localhost"])
     try:
-        session = browser.new_browser_cdp_session()
-        session.send("Browser.close")
-    except Exception:
-        pass
+        connection.send(json.dumps({"id": 1, "method": "Browser.close"}))
     finally:
+        connection.shutdown()
+
+
+def close_native_browser(_browser, session_file: Path) -> None:
+    # A Playwright CDPSession.send(Browser.close) can hang indefinitely when
+    # Chrome exits before acknowledging it. Never send it over the old driver.
+    process = _ACTIVE_BROWSERS.get(session_file)
+    if process is None:
+        return
+    if process.poll() is None:
         try:
-            browser.close()
+            request_browser_close(session_file)
         except Exception:
+            # A concurrent window close/Stop may have already ended Chrome.
+            # Its exit, rather than a CDP acknowledgement, confirms shutdown.
             pass
-        try:
-            session_file.unlink(missing_ok=True)
-        except OSError:
-            pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("Chrome/Edge chưa đóng hoàn toàn. Chạy stop.bat trước khi Start lại.") from exc
+    _ACTIVE_BROWSERS.pop(session_file, None)
+    session_file.unlink(missing_ok=True)

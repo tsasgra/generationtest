@@ -13,3 +13,5 @@ examples/
 img/*
 !img/.gitkeep
 /.gemini-stop-request
+/.gemini-*.lock
+/.gemini-runtime/

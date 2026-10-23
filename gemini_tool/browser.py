@@ -8,7 +8,7 @@ import sys
 import time
 from urllib.parse import urlencode, urlsplit
 
-from .control import check_stop
+from .control import check_stop, exclusive_lock
 from .images import PreparedImage, delete_uploaded
 from .native import close_native_browser, start_native_browser, wait_for_manual_login
 
@@ -40,31 +40,32 @@ def open_browser(profile: Path, login_timeout: float):
     """Use copy_info_on_gemini's native login before connecting automation."""
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
-    check_stop()
-    login_url = "https://accounts.google.com/ServiceLogin?" + urlencode({
-        "continue": GEMINI_URL, "followup": GEMINI_URL, "passive": "1209600",
-    })
-    try:
-        port, session_file, old_tabs = start_native_browser(login_url, profile)
-        wait_for_manual_login(port, old_tabs, timeout=login_timeout)
-    except (OSError, ValueError) as exc:
-        raise GeminiBrowserError(f"{exc}\nChưa tải hoặc xóa ảnh của lần chạy này.") from exc
-    # Do not start the Playwright driver or attach CDP during Google sign-in.
-    with sync_playwright() as playwright:
+    with exclusive_lock(profile.resolve() / ".gemini-profile.lock"):
+        check_stop()
+        login_url = "https://accounts.google.com/ServiceLogin?" + urlencode({
+            "continue": GEMINI_URL, "followup": GEMINI_URL, "passive": "1209600",
+        })
         try:
-            browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=5000)
-        except PlaywrightError as exc:
-            check_stop()
-            raise GeminiBrowserError(
-                "Không kết nối được Chrome/Edge vừa đăng nhập. Đóng cửa sổ của script rồi chạy lại. "
-                "Chưa tải hoặc xóa ảnh."
-            ) from exc
-        try:
-            if not browser.contexts:
-                raise GeminiBrowserError("Không tìm thấy phiên Chrome/Edge vừa đăng nhập; ảnh được giữ nguyên.")
-            yield browser.contexts[0]
-        finally:
-            close_native_browser(browser, session_file)
+            port, session_file, old_tabs = start_native_browser(login_url, profile)
+            wait_for_manual_login(port, old_tabs, timeout=login_timeout)
+        except (OSError, ValueError) as exc:
+            raise GeminiBrowserError(f"{exc}\nChưa tải hoặc xóa ảnh của lần chạy này.") from exc
+        # Do not start the Playwright driver or attach CDP during Google sign-in.
+        with sync_playwright() as playwright:
+            try:
+                browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=5000)
+            except PlaywrightError as exc:
+                check_stop()
+                raise GeminiBrowserError(
+                    "Không kết nối được Chrome/Edge vừa đăng nhập. Đóng cửa sổ của script rồi chạy lại. "
+                    "Chưa tải hoặc xóa ảnh."
+                ) from exc
+            try:
+                if not browser.contexts:
+                    raise GeminiBrowserError("Không tìm thấy phiên Chrome/Edge vừa đăng nhập; ảnh được giữ nguyên.")
+                yield browser.contexts[0]
+            finally:
+                close_native_browser(browser, session_file)
 
 
 def wait_for_editor(page, timeout: float):
@@ -416,7 +417,7 @@ def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
     except Exception as exc:
         raise GeminiBrowserError(
             "Đã bấm Gửi nhưng chưa xác nhận được đủ ảnh trong chat sau khi tải lại. "
-            "Giữ nguyên ảnh gốc. Kiểm tra tab hiện tại trước khi chạy lại để tránh gửi trùng."
+            "Giữ nguyên ảnh gốc. Kiểm tra lịch sử chat Gemini trước khi chạy lại để tránh gửi trùng."
         ) from exc
 
 
@@ -425,10 +426,14 @@ def keep_tabs_open(pages):
     while any(not page.is_closed() for page in pages):
         check_stop()
         page = next(page for page in pages if not page.is_closed())
+        browser = page.context.browser
+        if browser is not None and not browser.is_connected():
+            return
         try:
             page.wait_for_timeout(300)
         except Exception:
-            if any(not item.is_closed() for item in pages):
+            check_stop()
+            if not page.is_closed() and (browser is None or browser.is_connected()):
                 raise
 
 
@@ -467,9 +472,8 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                             kept.extend(delete_uploaded(batch))
                 if attach_only:
                     print("Ảnh đang đính kèm, chưa gửi. Giữ nguyên toàn bộ ảnh gốc.")
-            except Exception as exc:
-                print(f"Lỗi: {exc}\nGiữ tab và ảnh chưa xác nhận để kiểm tra.", file=sys.stderr)
-                keep_tabs_open(pages)
+            except Exception:
+                print("Đã dừng lần chạy lỗi; giữ ảnh chưa xác nhận và đóng phiên trình duyệt này.", file=sys.stderr)
                 raise
             if kept:
                 keep_tabs_open(pages)

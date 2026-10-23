@@ -7,9 +7,12 @@ import ntpath
 import os
 from pathlib import Path, PureWindowsPath
 import re
-import stat
 import subprocess
 import sys
+import tempfile
+
+from .control import exclusive_lock
+from .state import ordinary_directory, remove_state, reset_browser_state, saved_profiles
 
 ROOT = Path(__file__).resolve().parent.parent
 PYTHON_NAME = re.compile(r"(?:py|pythonw?|python\d+(?:\.\d+)*)\.exe", re.I)
@@ -104,6 +107,8 @@ def is_tool_process(process: dict, directory: Path) -> bool:
     if is_uploader(process):
         return True
     arguments = python_arguments(process)
+    if arguments[:2] == ["-m", "gemini_tool.launch"]:
+        return True
     if arguments[:2] == ["-m", "venv"]:
         return len(arguments) == 3 and path_key(arguments[2]) == path_key(directory / ".venv-gemini")
     if arguments[:3] == ["-m", "pip", "install"]:
@@ -114,6 +119,7 @@ def is_tool_process(process: dict, directory: Path) -> bool:
 
 def profile_roots(directory: Path, processes: list[dict], extra: list[Path]) -> set[Path]:
     roots = {directory / ".gemini-browser-native", *extra}
+    roots.update(saved_profiles(directory / ".gemini-runtime"))
     roots.update(path for path in directory.glob(".gemini-browser*") if path.is_dir())
     for process in processes:
         if not is_uploader(process):
@@ -213,12 +219,6 @@ def stop_all(directory: Path, extra: list[Path]) -> tuple[int, set[Path]]:
     return stopped, roots
 
 
-def ordinary_directory(path: Path) -> bool:
-    if not path.is_dir() or path.is_symlink():
-        return False
-    return not (getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
-
-
 def reset_connections(roots: set[Path]) -> int:
     removed = 0
     for root in sorted(roots):
@@ -226,14 +226,21 @@ def reset_connections(roots: set[Path]) -> int:
             continue
         for name in ("chrome", "edge"):
             browser = root / name
-            if not ordinary_directory(browser):
-                continue
-            state = browser / "gemini-export-session.json"
-            try:
-                state.unlink()
-                removed += 1
-            except FileNotFoundError:
-                pass
+            removed += reset_browser_state(browser)
+    return removed
+
+
+def reset_temporary_files(directory: Path) -> int:
+    removed = remove_state(directory / ".gemini-runtime")
+    # Older releases prepared images in the Windows temp directory. A forced
+    # termination could leave them behind; only accept the tool's file layout.
+    for path in Path(tempfile.gettempdir()).glob("gemini-upload-*"):
+        if ordinary_directory(path) and all(
+            item.is_file() and not item.is_symlink()
+            and re.fullmatch(r"(?:\d{4,}_.+\.png|\.source-\d{4,})", item.name)
+            for item in path.iterdir()
+        ):
+            removed += remove_state(path)
     return removed
 
 
@@ -248,7 +255,7 @@ def request_stop(directory: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Dừng Gemini uploader và xóa trạng thái kết nối cục bộ.")
+    parser = argparse.ArgumentParser(description="Dừng Gemini uploader, dọn dữ liệu chạy và giữ đăng nhập Google.")
     parser.add_argument("--profile", type=Path, action="append", default=[],
                         help="Profile riêng bên ngoài repo cần dừng/dọn; có thể truyền nhiều lần.")
     args = parser.parse_args(argv)
@@ -256,15 +263,19 @@ def main(argv: list[str] | None = None) -> int:
         print("stop.bat chỉ dùng trên Windows.", file=sys.stderr)
         return 1
     try:
-        request_stop(ROOT)
-        print("Đã gửi yêu cầu Stop. Đang đóng uploader và trình duyệt của công cụ...", flush=True)
-        stopped, roots = stop_all(ROOT, args.profile)
-        removed = reset_connections(roots)
+        # Keep Start outside the entire reset, including the interval between
+        # killing the old uploader and removing its browser/session state.
+        with exclusive_lock(ROOT / ".gemini-reset.lock", timeout=2):
+            request_stop(ROOT)
+            print("Đã gửi yêu cầu Stop. Đang đóng uploader và trình duyệt của công cụ...", flush=True)
+            stopped, roots = stop_all(ROOT, args.profile)
+            removed = reset_connections(roots)
+            removed += reset_temporary_files(ROOT)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"Lỗi khi dừng/dọn trạng thái: {exc}", file=sys.stderr)
         return 1
     print(f"Đã hoàn tất Stop; không còn tiến trình của công cụ (dừng cưỡng bức {stopped} tiến trình gốc).")
-    print(f"Đã xóa {removed} file trạng thái kết nối/checkpoint cục bộ.")
+    print(f"Đã dọn {removed} mục dữ liệu chạy: checkpoint, tab khôi phục, bản nháp, cache và ảnh tạm.")
     print("Giữ nguyên ảnh trong img và phiên đăng nhập Google. Bấm start_gemini.bat để chạy lại.")
     print("Tin nhắn Gemini đã nhận vẫn tồn tại; Stop không thu hồi ảnh đã gửi.")
     return 0

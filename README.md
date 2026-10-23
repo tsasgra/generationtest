@@ -30,34 +30,40 @@ Không chạy hai bản script cùng lúc hoặc chỉnh sửa/di chuyển ảnh
 
 ## Dừng và xóa trạng thái bằng stop.bat
 
-Bấm đúp **`stop.bat`** để dừng uploader, các tiến trình con và Chrome/Edge dùng
-profile riêng của script. File Start đang kiểm tra/cài thư viện cũng được hủy,
-không tự chạy tiếp sang bước tải ảnh. Sau khi dừng thành công, Stop xóa file
-`gemini-export-session.json` trong các profile riêng để lần sau mở kết nối mới.
-Nhánh này chưa có checkpoint tiếp tục upload; đây là trạng thái kết nối cục bộ.
-File trạng thái hỏng hoặc còn lại sau khi uploader đã thoát cũng được dọn.
+Bấm đúp **`stop.bat`** và chờ thông báo **Đã hoàn tất Stop**, sau đó bấm
+`start_gemini.bat` để chạy lại từ đầu. Stop đóng uploader, bộ khởi động/cài thư viện,
+các tiến trình con và Chrome/Edge dùng profile riêng của script, rồi dọn:
 
-Uploader đọc tín hiệu Stop trong lúc chờ đăng nhập, mở chat, tải ảnh, xác nhận tin
-nhắn và giữ tab khi có lỗi. Khi nhận Stop, uploader thoát các vòng chờ, đóng phiên
-trình duyệt tự động và dọn ảnh chuyển đổi tạm. Stop dùng `taskkill` để dừng tiến
-trình còn sót, xử lý cây Chrome/Edge qua tiến trình cha để tránh kiểm tra lặp lại
-từng renderer đã đóng. Cửa sổ Stop in tiến độ ngay khi gửi yêu cầu dừng.
+- File kết nối/checkpoint, cổng debug và khóa trình duyệt cũ.
+- Tab/phiên khôi phục, bản nháp, dữ liệu trang web cục bộ và service worker.
+- Cache trình duyệt, lịch sử duyệt cục bộ và ảnh chuyển đổi tạm, kể cả ảnh tạm còn
+  sót khi tiến trình bị dừng cưỡng bức.
 
-**Giữ nguyên ảnh trong `img/`, mã nguồn, thư viện đã cài và phiên đăng nhập Google.**
-Stop không xóa lịch sử chat hoặc thu hồi ảnh mà Gemini đã nhận. Các cửa sổ BAT
-đang chờ nhấn phím có thể vẫn mở. Bấm lại `start_gemini.bat` để bắt đầu lần chạy mới.
-Không bấm Start trong khi Stop vẫn đang xử lý.
+**Giữ nguyên ảnh gốc, mã nguồn, thư viện đã cài và dữ liệu đăng nhập Google.**
+Stop giữ file cookie, khóa mã hóa và dữ liệu tài khoản tại vị trí cũ; không xóa hay
+thay toàn bộ profile. Stop không thu hồi ảnh hoặc xóa lịch sử chat trên máy chủ Gemini.
+Những ảnh đã gửi và đã được xóa sau khi xác nhận ở lần chạy trước không thể khôi phục
+bằng Stop. Các cửa sổ BAT đang chờ nhấn phím có thể vẫn mở, nhưng không còn chạy tác vụ.
 
-Stop nhận diện các lệnh Python thực sự chạy `gemini_upload.py`, kể cả bản sao
-repository khác, rồi dừng cây tiến trình bằng `taskkill /T /F`. Các bước cài đặt
-được nhận diện theo đúng đường dẫn của repository chứa Stop. Trình duyệt được
-nhận diện theo `--user-data-dir` của profile riêng; Python và trình duyệt cá nhân
-khác không bị dừng theo tên chung. Nếu không dừng được tiến trình, Stop báo lỗi
-và chưa xóa trạng thái kết nối.
+Start giữ khóa hệ điều hành trong suốt bước chuẩn bị và tải ảnh; không mở hai lần
+chạy chồng nhau và không xóa tín hiệu dừng khi phiên cũ chưa thoát. Trong lúc Stop
+đang dọn, Start sẽ báo chờ Stop hoàn tất. Khóa tự nhả khi tiến trình bị tắt, nên file
+khóa còn trên ổ đĩa không gây kẹt lần sau. Mỗi lần chạy mở trình duyệt mới, không nối
+vào phiên cũ. Khi lỗi sau bước kết nối, uploader giữ ảnh chưa xác nhận và đóng phiên
+trình duyệt lỗi ngay, không tiếp tục chờ trên tab đã đóng.
+Lệnh đóng dùng kết nối có giới hạn thời gian; script chờ tiến trình trình duyệt
+thoát trước khi nhả phiên, tránh treo vô hạn khi Chrome đóng trước khi trả lời lệnh.
 
-Các profile `.gemini-browser*` ngay trong repository được tìm tự động. Profile
-tùy chỉnh của uploader đang chạy cũng được nhận diện. Nếu dùng profile ở ngoài
-repo và uploader đã thoát, truyền lại đường dẫn đó:
+Stop nhận diện lệnh Python chạy uploader hoặc `gemini_tool.launch`, rồi dừng đúng
+cây tiến trình bằng `taskkill /T /F`. Trình duyệt được nhận diện theo
+`--user-data-dir` của profile riêng; trình duyệt cá nhân khác không bị dừng theo tên
+chung. Nếu không dừng được tiến trình hoặc không dọn được dữ liệu, Stop báo lỗi.
+Không xem đó là reset thành công; đọc lỗi và chạy lại Stop trước khi Start.
+
+Các profile `.gemini-browser*` trong repository được tìm tự động. Phiên mới cũng
+ghi lại vị trí profile tùy chỉnh trong `.gemini-runtime`, để Stop tìm được ngay cả
+khi uploader đã bị tắt. Với profile ngoài repo của bản cũ chưa được ghi nhận,
+truyền lại đường dẫn:
 
 ```bat
 stop.bat --profile "D:\GeminiProfile"
@@ -65,7 +71,7 @@ stop.bat --profile "D:\GeminiProfile"
 
 Stop cần Python 3.10+ và Windows PowerShell có sẵn; không cài thêm thư viện.
 Nếu cửa sổ của công cụ chạy bằng quyền khác, Stop cần quyền truy cập tiến trình
-tương ứng. Giữ file `gemini_tool/stop.py` cạnh mã nguồn khi cập nhật repository.
+tương ứng. Khi cập nhật, lấy cả thư mục `gemini_tool` và hai file BAT.
 
 ## Trình duyệt từ copy_info_on_gemini
 
@@ -95,7 +101,7 @@ Các tùy chọn cũ `--polygon-python`, `--login`, `--browser`, `--browser-path
 Nếu chuyển nhánh trong **cùng thư mục** đã chạy bản `copy_info_on_gemini`, profile
 `.gemini-browser-native` có thể được dùng lại. Nếu hai bản nằm ở hai thư mục khác
 nhau, mỗi bản giữ phiên riêng. Không chạy đồng thời hai công cụ dùng cùng profile.
-Script chỉ đóng cửa sổ của profile riêng sau khi bạn xem xong các tab kết quả;
+Khi thành công, script đóng cửa sổ của profile riêng sau khi bạn xem xong các tab kết quả;
 cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 
 ## Khi nào ảnh bị xóa?
@@ -179,9 +185,13 @@ chế độ chỉ đính kèm và việc giữ/xóa đúng ảnh gốc. File ki�
 Kiểm thử Stop mô phỏng việc dừng đúng cây tiến trình/profile, PID bị tái sử dụng,
 lỗi quyền truy cập, dọn trạng thái hỏng và giữ ảnh cùng dữ liệu đăng nhập.
 Đã chạy tiến trình uploader riêng với Chromium thật và trang Gemini mô phỏng:
-Stop trong lúc chờ tải ảnh hoặc giữ tab do lỗi đều đóng trình duyệt, xóa ảnh tạm,
+Stop trong lúc chờ tải ảnh hoặc xem tab kết quả đều đóng trình duyệt, xóa ảnh tạm,
 giữ ảnh gốc và trả mã dừng 130 mà không cần cưỡng bức tiến trình thử nghiệm.
-Phần dừng tiến trình Windows chưa được chạy trực tiếp trên Windows thật.
+Đã kiểm tra thêm bằng Chromium mở qua CDP với profile lưu trên ổ đĩa: đóng trình
+duyệt giữa lúc tải → Stop → ba lần tải/submit liên tiếp, mỗi lần đều reset rồi
+mở lại. Cookie đăng nhập giả lập vẫn còn sau mỗi lần reset; ảnh gốc được giữ,
+ảnh tạm/tab/bản nháp được dọn. Đây là trang Gemini mô phỏng, không dùng tài khoản
+Google thật. Phần dừng tiến trình Windows chưa được chạy trực tiếp trên Windows thật.
 
 Script test cục bộ đã truy cập Gemini thật ở phiên khách: ảnh vào vùng xem trước
 qua ô chọn ảnh riêng nhưng dừng ở 50% sau 180 giây; chưa xác nhận submit thành công.
