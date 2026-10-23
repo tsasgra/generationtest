@@ -1,8 +1,4 @@
-"""Native browser login ported from copy_info_on_gemini's gemini_export.bat.
-
-Chrome/Edge handles sign-in before the uploader attaches Playwright over CDP.
-Only the dedicated local browser profile is used.
-"""
+"""Open Gemini in installed Chrome/Edge with a dedicated local profile."""
 from __future__ import annotations
 
 import json
@@ -17,7 +13,7 @@ from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, build_opener
 
 def find_system_browser() -> tuple[str, Path]:
-    """Use the installed, supported browser and its normal login UI."""
+    """Use an installed, supported browser."""
     for name, executable, relative in (
         ("chrome", "chrome.exe", "Google/Chrome/Application/chrome.exe"),
         ("edge", "msedge.exe", "Microsoft/Edge/Application/msedge.exe"),
@@ -57,7 +53,7 @@ def find_system_browser() -> tuple[str, Path]:
         for candidate in candidates:
             if candidate.is_file():
                 return name, candidate.resolve()
-    raise ValueError("Cần Google Chrome hoặc Microsoft Edge bản cập nhật trên máy để đăng nhập Gemini.")
+    raise ValueError("Cần Google Chrome hoặc Microsoft Edge bản cập nhật trên máy để mở Gemini.")
 
 def read_debug_json(port: int, route: str):
     if type(port) is not int or not 1024 <= port <= 65535:
@@ -77,7 +73,7 @@ def debug_endpoint(port: int) -> dict:
         raise ValueError("Kết nối trình duyệt không thuộc phiên cục bộ này.")
     return info
 
-def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[str]]:
+def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path]:
     name, executable = find_system_browser()
     profile = (profile_root / name).resolve()
     profile.mkdir(parents=True, exist_ok=True)
@@ -87,11 +83,10 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
         saved = json.loads(session_file.read_text(encoding="utf-8"))
         info = debug_endpoint(saved["port"])
         if info["webSocketDebuggerUrl"] == saved["websocket"]:
-            old_tabs = {tab["id"] for tab in read_debug_json(saved["port"], "/json/list")}
             subprocess.Popen([
                 str(executable), f"--user-data-dir={profile}", "--new-window", url,
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return saved["port"], session_file, old_tabs
+            return saved["port"], session_file
     except (OSError, ValueError, KeyError, TypeError):
         pass
     with socket.socket() as listener:
@@ -112,7 +107,7 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
                 "port": port, "websocket": info["webSocketDebuggerUrl"],
             }), encoding="utf-8")
             print(f"Đã mở {name.title()} trên máy.", flush=True)
-            return port, session_file, set()
+            return port, session_file
         except (OSError, ValueError, KeyError):
             if process.poll() is not None:
                 break
@@ -121,33 +116,6 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
         "Không kết nối được cửa sổ Chrome/Edge của script. Đóng cửa sổ này rồi chạy lại BAT. "
         "Nếu máy có chính sách công ty chặn kết nối trình duyệt, cần quản trị viên cho phép."
     )
-
-def wait_for_manual_login(port: int, old_tabs: set[str], timeout: float = 600) -> None:
-    """Wait for Google's redirect before attaching any browser automation."""
-    print("Đăng nhập Google trong cửa sổ mới nếu được yêu cầu; script sẽ tự tiếp tục.", flush=True)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            tabs = read_debug_json(port, "/json/list")
-        except (OSError, ValueError) as exc:
-            raise ValueError("Cửa sổ đăng nhập đã đóng hoặc mất kết nối. Chạy lại BAT để tiếp tục.") from exc
-        pages = [tab for tab in tabs if tab.get("type") == "page" and tab.get("id") not in old_tabs]
-        for tab in pages:
-            parsed = urlsplit(tab.get("url", ""))
-            if parsed.hostname == "accounts.google.com" and "/signin/rejected" in parsed.path:
-                raise ValueError(
-                    "Google đã từ chối đăng nhập trong Chrome/Edge. Chưa kết nối tự động, "
-                    "chưa tải hoặc xóa ảnh. Giữ cửa sổ để bạn kiểm tra thông báo của Google."
-                )
-            if parsed.scheme == "https" and parsed.netloc == "gemini.google.com":
-                return
-        if not pages:
-            # The initial tab may still be being created during browser startup.
-            if not tabs:
-                time.sleep(0.5)
-                continue
-        time.sleep(0.5)
-    raise ValueError(f"Hết {timeout:g} giây chờ đăng nhập Google. Chạy lại BAT để tiếp tục.")
 
 def close_native_browser(browser, session_file: Path) -> None:
     # Close only our dedicated browser, allowing it to flush its saved login.
