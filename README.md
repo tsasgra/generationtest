@@ -10,7 +10,8 @@ Script giữ các tab Gemini mở để bạn xem kết quả; đóng tab hoặc
 2. Đặt ảnh vào `img`, cạnh `gemini_upload.py`, rồi bấm đúp `start_gemini.bat`.
    File chạy tự tạo `.venv-gemini` và cài thư viện cần thiết.
 3. Đăng nhập Google trong cửa sổ Chrome/Edge được mở. Script chờ đăng nhập trước khi kết nối tự động.
-4. Khi ô chat sẵn sàng, script tự gửi ảnh, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
+4. Khi ô chat sẵn sàng, script bấm **dấu + → Upload files / Tải tệp lên**, chọn ảnh,
+   gửi tin nhắn, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
 5. Xem kết quả rồi đóng các tab Gemini do script mở hoặc nhấn Ctrl+C.
 
 Lần sau chỉ cần thêm ảnh vào `img` và chạy lại. Phiên đăng nhập được giữ trong

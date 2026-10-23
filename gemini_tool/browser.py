@@ -13,11 +13,16 @@ from .native import close_native_browser, start_native_browser, wait_for_manual_
 
 GEMINI_URL = "https://gemini.google.com/app?hl=en"
 EDITOR = 'rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]'
+COMPOSER = 'input-container, .input-area-container, .input-container, form'
 UPLOAD_NAME = re.compile(
     r"add files|add photos|upload files?|open upload file menu|"
-    r"thêm (tệp|ảnh)|tải (tệp|ảnh) lên|mở trình đơn tải", re.I,
+    r"thêm (tệp|ảnh)|tải (tệp|ảnh) lên|mở trình đơn tải|^(?:add|thêm|\+)\s*$", re.I,
 )
-LOCAL_UPLOAD_NAME = re.compile(r"upload files?|from computer|tải tệp lên|từ máy tính", re.I)
+LOCAL_UPLOAD_NAME = re.compile(
+    r"^\s*(?:upload files?|(?:upload )?from computer|tải (?:tệp|ảnh) lên|tải lên tệp|từ máy tính)\s*$", re.I,
+)
+PLUS_ICON = re.compile(r"^\s*(?:add|add_2|add_circle|add_circle_outline|attach_file|\+)\s*$")
+UPLOAD_MENU = '[role="menu"], .cdk-overlay-container, .mat-mdc-menu-panel, [data-test-id="upload-menu"]'
 SEND_NAME = re.compile(r"^(send|send message|submit|gửi|gửi tin nhắn)(\s.*)?$", re.I)
 
 
@@ -97,8 +102,8 @@ def new_chat(page, timeout: float):
     return page
 
 
-def _file_input(page):
-    inputs = page.locator('input[type="file"]')
+def _file_input(root):
+    inputs = root.locator('input[type="file"]')
     for i in range(inputs.count()):
         candidate = inputs.nth(i)
         accept = (candidate.get_attribute("accept") or "").lower()
@@ -107,41 +112,97 @@ def _file_input(page):
     return None
 
 
-def choose_files(page, paths: list[Path]):
-    """Prefer the native input, falling back to the visible upload menu."""
+def _first_ready(locator):
+    for index in range(locator.count()):
+        candidate = locator.nth(index)
+        if candidate.is_visible() and candidate.is_enabled():
+            return candidate
+    return None
+
+
+def _composer(page):
+    return _first_ready(page.locator(COMPOSER).filter(has=page.locator(EDITOR)))
+
+
+def _upload_button(composer):
+    # Scope to the editor: the sidebar's New chat can also have a plus icon.
+    button = _first_ready(composer.get_by_role("button", name=UPLOAD_NAME))
+    if button is not None:
+        return button
+    button = _first_ready(composer.locator(
+        'button.upload-card-button, button[data-test-id="upload-file-button"], '
+        'button[data-test-id="upload-menu-button"]'
+    ))
+    if button is not None:
+        return button
+    # A has-locator is evaluated relative to each button, so it must not
+    # include the composer's ancestor selector.
+    icons = composer.page.locator(
+        'mat-icon, .material-icons, .material-symbols-outlined, .material-symbols-rounded, .google-symbols'
+    ).filter(has_text=PLUS_ICON).or_(composer.page.locator(
+        'mat-icon[fonticon="add"], mat-icon[fonticon="add_2"], [data-mat-icon-name="add"]'
+    ))
+    return _first_ready(composer.get_by_role("button").filter(has=icons))
+
+
+def _upload_option(page):
+    option = _first_ready(page.get_by_role("menuitem", name=LOCAL_UPLOAD_NAME))
+    if option is not None:
+        return option
+    # Some Gemini menus use plain clickable text instead of menuitem roles.
+    # Limit text matching to the popup so a prior chat message cannot be clicked.
+    return _first_ready(page.locator(UPLOAD_MENU).get_by_text(LOCAL_UPLOAD_NAME))
+
+
+def choose_files(page, paths: list[Path], timeout: float = 15):
+    """Open the composer's + menu, choose Upload files, then supply local images."""
     values = [str(p.resolve()) for p in paths]
-    file_input = _file_input(page)
-    if file_input is not None:
-        file_input.set_input_files(values)
-        return
     choosers = []
     listener = lambda chooser: choosers.append(chooser)
     page.on("filechooser", listener)
+    opened_menu = False
+    selected_upload = False
     try:
-        button = page.get_by_role("button", name=UPLOAD_NAME).first
-        if not button.is_visible():
-            raise GeminiBrowserError("Không tìm thấy nút thêm ảnh. Giao diện Gemini có thể đã đổi.")
-        button.click()
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if choosers:
                 choosers[-1].set_files(values)
                 return
-            file_input = _file_input(page)
-            if file_input is not None:
-                file_input.set_input_files(values)
-                return
-            options = page.get_by_role("menuitem", name=LOCAL_UPLOAD_NAME).or_(
-                page.get_by_role("button", name=LOCAL_UPLOAD_NAME)
-            )
-            visible = [options.nth(i) for i in range(options.count()) if options.nth(i).is_visible()]
-            if visible:
-                with page.expect_file_chooser(timeout=10000) as chooser:
-                    visible[-1].click()
-                chooser.value.set_files(values)
-                return
+            if selected_upload:
+                # The file input may be inserted after clicking Upload files
+                # without firing a native filechooser event.
+                file_input = _file_input(page)
+                if file_input is not None:
+                    file_input.set_input_files(values)
+                    return
+            else:
+                option = _upload_option(page)
+                if option is not None:
+                    option.click()
+                    selected_upload = True
+                    continue
+                if not opened_menu:
+                    composer = _composer(page)
+                    if composer is not None:
+                        button = _upload_button(composer)
+                        if button is not None:
+                            button.click()
+                            opened_menu = True
+                            continue
+                        # Retain compatibility with layouts exposing an input
+                        # directly in the composer without an upload menu.
+                        file_input = _file_input(composer)
+                        if file_input is not None:
+                            file_input.set_input_files(values)
+                            return
             page.wait_for_timeout(100)
-        raise GeminiBrowserError("Không tìm thấy mục Upload files hoặc ô chọn ảnh trên Gemini.")
+        if selected_upload:
+            detail = "Đã chọn Upload files nhưng không nhận được ô chọn tệp."
+        elif opened_menu:
+            detail = "Đã bấm dấu + nhưng không tìm thấy mục Upload files / Tải tệp lên."
+        else:
+            detail = "Không tìm thấy nút dấu + để thêm ảnh trong ô chat Gemini."
+        raise GeminiBrowserError(detail + " Chưa xác nhận tải ảnh; giữ nguyên ảnh gốc.")
     finally:
         page.remove_listener("filechooser", listener)
 
