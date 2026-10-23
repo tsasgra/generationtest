@@ -10,7 +10,7 @@ import tempfile
 
 from gemini_tool.browser import GeminiBrowserError, upload_images
 from gemini_tool.images import ImageInputError, collect_images, prepare_images
-from gemini_tool.runtime import BrowserRuntimeError, probe_browser_runtime, run_reference_browser
+from gemini_tool.native import find_system_browser
 
 ROOT = Path(__file__).resolve().parent
 
@@ -22,27 +22,16 @@ def positive_number(value: str) -> float:
     return number
 
 
-def describe_browser(reference_python: Path | None) -> dict:
-    information = probe_browser_runtime(reference_python)
-    print(f"Python trình duyệt: {information['python_executable']}")
-    print(f"Playwright: {information['playwright_version']}")
-    print(f"Chromium: {information['chromium_executable']}")
-    print("Chromium đã cài: " + ("có" if information['chromium_installed'] else "chưa"))
-    return information
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Tự nhận diện ảnh trong img, gửi lên Gemini rồi xóa ảnh đã xác nhận.")
     parser.add_argument("--input", type=Path, default=ROOT / "img", help="Thư mục ảnh (mặc định: img cạnh script).")
     parser.add_argument("--recursive", action="store_true", help="Đọc cả các thư mục con.")
     parser.add_argument("--dry-run", action="store_true", help="Kiểm tra/chuyển ảnh offline, không mở Gemini.")
-    parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-polygon",
-                        help="Profile Chromium riêng; cùng cách mở với copy_info_on_polygon.")
-    parser.add_argument("--polygon-python", type=Path,
-                        help="Đường dẫn python.exe của bản copy_info_on_polygon để dùng đúng Playwright/Chromium đã cài ở đó.")
+    parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-native",
+                        help="Thư mục profile Chrome/Edge riêng, giống copy_info_on_gemini.")
     parser.add_argument("--browser-info", action="store_true",
-                        help="In Python, phiên bản Playwright và đường dẫn Chromium rồi thoát; không cần ảnh.")
-    parser.add_argument("--login-timeout", type=positive_number, default=300, help="Thời gian chờ đăng nhập, giây.")
+                        help="In tên và đường dẫn Chrome/Edge sẽ dùng rồi thoát; không cần ảnh.")
+    parser.add_argument("--login-timeout", type=positive_number, default=600, help="Thời gian chờ đăng nhập, giây.")
     parser.add_argument("--upload-timeout", type=positive_number, default=180, help="Thời gian chờ tải ảnh, giây.")
     parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10, help="Tối đa 10 ảnh mỗi chat mới.")
     parser.add_argument("--max-file-mb", type=positive_number, default=20, help="Giới hạn MiB mỗi PNG sau chuyển đổi.")
@@ -54,8 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--prompt không được rỗng.")
     try:
         if args.browser_info:
-            information = describe_browser(args.polygon_python)
-            return 0 if information['chromium_installed'] else 1
+            name, executable = find_system_browser()
+            print(f"Trình duyệt: {name.title()}\nĐường dẫn: {executable}")
+            print(f"Profile: {(args.profile / name).resolve()}")
+            print("Đăng nhập trực tiếp trước, kết nối Playwright sau khi quay về Gemini.")
+            return 0
         files = collect_images(args.input.resolve(), args.recursive)
         # Validate every image before creating any chats. Temp files stay alive
         # until the browser workflow ends and are removed on success or failure.
@@ -67,24 +59,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.dry_run:
                 print("Kiểm tra offline thành công. Chưa mở Gemini hoặc tải ảnh lên mạng.")
                 return 0
-            options = dict(
-                profile=args.profile,
+            upload_images(
+                images, profile=args.profile,
                 login_timeout=args.login_timeout, upload_timeout=args.upload_timeout,
                 batch_size=args.batch_size, prompt=args.prompt,
                 keep_images=args.keep_images, attach_only=args.attach_only,
             )
-            if args.polygon_python:
-                information = describe_browser(args.polygon_python)
-                if not information['chromium_installed']:
-                    raise BrowserRuntimeError(
-                        "Python được chọn chưa có Chromium. Hãy chọn đúng Python mà bản Polygon đang dùng; "
-                        "không tự đổi sang trình duyệt khác. Chưa tải hoặc xóa ảnh."
-                    )
-                sys.stdout.flush()
-                return run_reference_browser(args.polygon_python, images, options, Path(directory))
-            upload_images(images, **options)
         return 0
-    except (ImageInputError, GeminiBrowserError, BrowserRuntimeError, OSError) as exc:
+    except (ImageInputError, GeminiBrowserError, ValueError, OSError) as exc:
         print(f"Lỗi: {exc}", file=sys.stderr)
         return 1
     except ImportError as exc:

@@ -6,71 +6,46 @@ Script giữ các tab Gemini mở để bạn xem kết quả; đóng tab hoặc
 
 ## Windows: lần chạy đầu
 
-1. Cài Python **3.10+**.
+1. Cài Python **3.10+** và Google Chrome hoặc Microsoft Edge bản cập nhật.
 2. Đặt ảnh vào `img`, cạnh `gemini_upload.py`, rồi bấm đúp `start_gemini.bat`.
-   File chạy tự tạo `.venv-gemini`, cài thư viện và **tải Chromium của Playwright nếu thiếu**.
-3. Đăng nhập Google ngay trong cửa sổ Chromium được mở. Giữ cửa sổ này mở.
+   File chạy tự tạo `.venv-gemini` và cài thư viện cần thiết.
+3. Đăng nhập Google trong cửa sổ Chrome/Edge được mở. Script chờ đăng nhập trước khi kết nối tự động.
 4. Khi ô chat sẵn sàng, script tự gửi ảnh, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
 5. Xem kết quả rồi đóng các tab Gemini do script mở hoặc nhấn Ctrl+C.
 
 Lần sau chỉ cần thêm ảnh vào `img` và chạy lại. Phiên đăng nhập được giữ trong
-`.gemini-browser-polygon`, tách khỏi các profile dùng trong phiên bản trước.
+`.gemini-browser-native/chrome` hoặc `.gemini-browser-native/edge`, giống nhánh `copy_info_on_gemini`.
 Không chạy hai bản script cùng lúc hoặc chỉnh sửa/di chuyển ảnh khi đang chạy.
 
-## Cùng trình duyệt với copy_info_on_polygon
+## Trình duyệt từ copy_info_on_gemini
 
-Cách mở được đối chiếu với
-[`polygon_tool/problem_url.py` trong nhánh `copy_info_on_polygon`](https://github.com/tsasgra/generationtest/blob/0b0b243ab835ce9f060cf5007a331b431697101d/polygon_tool/problem_url.py):
+Phần mở trình duyệt được chuyển từ
+[`gemini_export.bat` của nhánh `copy_info_on_gemini`](https://github.com/tsasgra/generationtest/blob/e5ee49144ef20f7d5b02e8aa31b69f8056a0125c/gemini_export.bat).
+Chỉ cần chạy **`start_gemini.bat`**, không cần chọn Python hoặc trình duyệt bằng tham số.
 
-```python
-context = playwright.chromium.launch_persistent_context(str(profile), headless=False)
-```
+1. Tìm **Google Chrome đã cài trên máy**, dùng Microsoft Edge nếu không tìm thấy Chrome.
+2. Mở trực tiếp trình duyệt đó bằng `subprocess.Popen`, với profile riêng và cổng
+   kết nối chỉ ở `127.0.0.1`.
+3. Mở trang đăng nhập Google `accounts.google.com/ServiceLogin`, trỏ về Gemini.
+   Bạn tự nhập tài khoản trong giao diện Google; script chờ tab mới quay về Gemini.
+4. **Sau bước này** mới khởi động Playwright và kết nối qua CDP. Script tiếp tục chờ
+   ô chat sẵn sàng, mở chat mới, tải và gửi ảnh.
 
-Đây là Chromium do Playwright quản lý, có cửa sổ và profile lưu phiên đăng nhập.
-Mã không chọn Chrome/Edge cài trên máy, không dùng CDP hay bước đóng/mở lại để đăng nhập.
-Các tùy chọn cũ `--login`, `--browser`, `--browser-path`, `--cdp-url` đã được bỏ;
-chạy lại `start_gemini.bat` không kèm các tùy chọn này.
+Cách này dùng Chrome/Edge của máy, không tải hoặc mở Chromium đi kèm Playwright.
+Không có bước giả mạo user-agent, tắt kiểm tra bảo mật hay đọc mật khẩu/cookie.
+Nếu Google vẫn chuyển đến trang “Couldn't sign you in”, script báo ngay và giữ ảnh.
+Chưa thể bảo đảm Google chấp nhận đăng nhập trên mọi máy/tài khoản.
 
-Đăng nhập được Polygon không bảo đảm Google chấp nhận cùng trình duyệt.
-Nếu Google chuyển tới trang “Couldn't sign you in”, script báo ngay và giữ nguyên
-ảnh để bạn kiểm tra; không báo thành công hoặc tự chuyển sang trình duyệt khác.
+Dùng `start_gemini.bat --browser-info` để xem tên, đường dẫn và profile trình duyệt
+sẽ dùng; lệnh này không cần ảnh và không mở trình duyệt.
+Các tùy chọn cũ `--polygon-python`, `--login`, `--browser`, `--browser-path`,
+`--cdp-url` không còn dùng. Khi cập nhật từ bản trước, chạy lại BAT không kèm chúng.
 
-### Dùng đúng bản Chromium đã cài cho Polygon
-
-`git pull` chỉ cập nhật mã nguồn; nó không mang theo Python, phiên bản Playwright,
-Chromium hay phiên đăng nhập trên máy. Nhánh Polygon ưu tiên `.venv\Scripts\python.exe`,
-rồi mới dùng Python hệ thống; nhánh Gemini dùng `.venv-gemini`. Vì vậy, cùng một lệnh
-mở trình duyệt vẫn có thể chạy hai bản Chromium khác nhau.
-
-Giữ bản Polygon đang dùng trên máy và chỉ định **đúng Python mà bản đó sử dụng**:
-
-```bat
-start_gemini.bat --polygon-python "C:\duong-dan\copy_info_on_polygon\.venv\Scripts\python.exe" --browser-info
-start_gemini.bat --polygon-python "C:\duong-dan\copy_info_on_polygon\.venv\Scripts\python.exe"
-```
-
-Thay đường dẫn ví dụ bằng đường dẫn thật. Nếu bản Polygon không có `.venv` và dùng
-Python hệ thống, lấy đường dẫn từ `py -3 -c "import sys; print(sys.executable)"`
-hoặc `python -c "import sys; print(sys.executable)"`, tương ứng với lệnh nó đã dùng.
-Để xem môi trường mặc định của Gemini, chạy `start_gemini.bat --browser-info`.
-Lệnh này in Python, phiên bản Playwright, đường dẫn Chromium và kiểm tra file
-trình duyệt đã cài; không cần ảnh, không mở trình duyệt và không thử đăng nhập.
-
-Khi có `--polygon-python`, việc nhận diện/chuyển ảnh vẫn chạy trong `.venv-gemini`;
-phần mở trình duyệt và gửi ảnh chạy bằng Python đã chỉ định cùng Playwright/Chromium
-của nó. Không cài hoặc cập nhật thư viện trong môi trường Polygon. Python nguồn phải
-có Playwright và Chromium đã cài. Nếu thiếu hoặc chạy lỗi, script báo lỗi thay vì
-tự dùng một trình duyệt khác. Profile Gemini vẫn nằm ở `.gemini-browser-polygon`;
-không sao chép cookie, mật khẩu hoặc dữ liệu đăng nhập từ Polygon.
-Khi nhấn Ctrl+C, script chờ tiến trình trình duyệt kết thúc rồi mới dọn file tạm;
-nếu tiến trình chưa thoát, script báo để bạn đóng cửa sổ của lần chạy đó.
-
-Đã kiểm tra mã nhánh Polygon: không có cơ chế riêng để đăng nhập Google, thay
-user-agent, bỏ kiểm tra TLS hay xử lý CAPTCHA. Key/secret và chữ ký SHA-512 trong
-[`polygon_tool/api.py`](https://github.com/tsasgra/generationtest/blob/0b0b243ab835ce9f060cf5007a331b431697101d/polygon_tool/api.py)
-chỉ dùng xác thực **Polygon API**. Dùng đúng Chromium giúp kiểm tra khác biệt môi
-trường, nhưng không bảo đảm Google chấp nhận đăng nhập. Nếu cả Chrome/Edge mở bằng
-tay cũng bị từ chối, chỉ thông báo này chưa đủ để xác định nguyên nhân.
+Nếu chuyển nhánh trong **cùng thư mục** đã chạy bản `copy_info_on_gemini`, profile
+`.gemini-browser-native` có thể được dùng lại. Nếu hai bản nằm ở hai thư mục khác
+nhau, mỗi bản giữ phiên riêng. Không chạy đồng thời hai công cụ dùng cùng profile.
+Script chỉ đóng cửa sổ của profile riêng sau khi bạn xem xong các tab kết quả;
+cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 
 ## Khi nào ảnh bị xóa?
 
@@ -122,13 +97,12 @@ hoa thường; đặt tên `001`, `002`, ... nếu cần thứ tự. Bỏ qua fi
 ```powershell
 py -3 -m venv .venv-gemini
 .\.venv-gemini\Scripts\python.exe -m pip install -r requirements-gemini.txt
-.\.venv-gemini\Scripts\python.exe -m playwright install chromium
 .\.venv-gemini\Scripts\python.exe gemini_upload.py
 ```
 
 macOS/Linux dùng `python3 -m venv .venv-gemini`, sau đó dùng
 `.venv-gemini/bin/python` cho các lệnh cài đặt/chạy. Cần phiên máy tính có giao diện.
-Linux có thể cần thêm thư viện hệ thống cho Chromium theo hướng dẫn Playwright.
+Cài Google Chrome hoặc Microsoft Edge; script tìm ứng dụng ở vị trí chuẩn hoặc PATH.
 Không dùng profile Chrome cá nhân cho `--profile`. Đóng phiên khác dùng cùng profile
 trước khi chạy. Không cần xóa profile cũ của bản trước để dùng bản này.
 
@@ -138,11 +112,9 @@ GitHub chỉ chứa mã chạy, thư viện cần cài, file `.bat`, hướng d�
 Ảnh, profile đăng nhập, môi trường Python, file test/example đều được loại khỏi Git.
 Với `--input`/`--profile` tự đặt, dùng đường dẫn ngoài repo hoặc bổ sung vào `.gitignore`.
 
-Các kiểm thử offline kiểm tra cấu hình mở Chromium giống nhánh tham chiếu, lưu phiên
-qua các lần mở, nhận diện trang Google từ chối đăng nhập, gửi/tải lại chat bằng trang
-mô phỏng, xóa đúng ảnh đã xác nhận và giữ ảnh lỗi/thay đổi. Phần dùng Python của
-Polygon được kiểm tra truyền dữ liệu ảnh, giữ thông tin đối chiếu trước khi xóa,
-báo lỗi môi trường, mã thoát và chạy mà không cần thư viện giải mã ảnh trong Python nguồn.
+Các kiểm thử offline kiểm tra trình tự mở Chrome/Edge → đăng nhập → kết nối CDP,
+nhận diện trang Google từ chối đăng nhập, gửi/tải lại chat bằng trang mô phỏng,
+xóa đúng ảnh đã xác nhận và giữ ảnh lỗi/thay đổi. File kiểm thử không được đưa lên GitHub.
 **Chưa xác minh end-to-end trên Gemini thật hoặc chạy `.bat` trên Windows thật**:
 môi trường phát triển không cho truy cập Gemini. Nếu giao diện Gemini thay đổi
 khiến không xác nhận được ảnh, script báo lỗi và giữ nguyên các ảnh chưa xác nhận.

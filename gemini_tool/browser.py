@@ -6,9 +6,10 @@ from pathlib import Path
 import re
 import sys
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from .images import PreparedImage, delete_uploaded
+from .native import close_native_browser, start_native_browser, wait_for_manual_login
 
 GEMINI_URL = "https://gemini.google.com/app?hl=en"
 EDITOR = 'rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]'
@@ -25,15 +26,33 @@ class GeminiBrowserError(RuntimeError):
 
 
 @contextmanager
-def open_browser(playwright, profile: Path):
-    """Match copy_info_on_polygon's polygon_tool/problem_url.py browser launch."""
-    profile = profile.resolve()
-    profile.mkdir(parents=True, exist_ok=True)
-    context = playwright.chromium.launch_persistent_context(str(profile), headless=False)
+def open_browser(profile: Path, login_timeout: float):
+    """Use copy_info_on_gemini's native login before connecting automation."""
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+
+    login_url = "https://accounts.google.com/ServiceLogin?" + urlencode({
+        "continue": GEMINI_URL, "followup": GEMINI_URL, "passive": "1209600",
+    })
     try:
-        yield context
-    finally:
-        context.close()
+        port, session_file, old_tabs = start_native_browser(login_url, profile)
+        wait_for_manual_login(port, old_tabs, timeout=login_timeout)
+    except (OSError, ValueError) as exc:
+        raise GeminiBrowserError(f"{exc}\nChưa tải hoặc xóa ảnh của lần chạy này.") from exc
+    # Do not start the Playwright driver or attach CDP during Google sign-in.
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=20000)
+        except PlaywrightError as exc:
+            raise GeminiBrowserError(
+                "Không kết nối được Chrome/Edge vừa đăng nhập. Đóng cửa sổ của script rồi chạy lại. "
+                "Chưa tải hoặc xóa ảnh."
+            ) from exc
+        try:
+            if not browser.contexts:
+                raise GeminiBrowserError("Không tìm thấy phiên Chrome/Edge vừa đăng nhập; ảnh được giữ nguyên.")
+            yield browser.contexts[0]
+        finally:
+            close_native_browser(browser, session_file)
 
 
 def wait_for_editor(page, timeout: float):
@@ -47,8 +66,7 @@ def wait_for_editor(page, timeout: float):
             location = urlsplit(page.url)
             if location.hostname == "accounts.google.com" and "/signin/rejected" in location.path:
                 raise GeminiBrowserError(
-                    "Google đã từ chối đăng nhập trong Chromium. Đây là cùng cơ chế trình duyệt "
-                    "của copy_info_on_polygon; đăng nhập được Polygon không bảo đảm Google chấp nhận. "
+                    "Google đã từ chối đăng nhập trong Chrome/Edge. "
                     "Chưa tải hoặc xóa ảnh của nhóm này. Giữ cửa sổ để bạn kiểm tra thông báo của Google."
                 )
             if urlsplit(page.url).hostname == "gemini.google.com":
@@ -240,49 +258,48 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                   login_timeout: float, upload_timeout: float,
                   batch_size: int, prompt: str, keep_images: bool = False,
                   attach_only: bool = False):
-    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+    from playwright.sync_api import Error as PlaywrightError
 
     pages = []
     kept = []
     try:
-        with sync_playwright() as playwright:
-            with open_browser(playwright, profile) as context:
-                print("Đã mở Chromium như nhánh copy_info_on_polygon.")
-                print(f"Đăng nhập Google ngay trong cửa sổ này nếu cần. Phiên lưu tại {profile.resolve()}.")
-                try:
-                    for start in range(0, len(images), batch_size):
-                        batch = images[start:start + batch_size]
-                        # Reuse the launcher's empty tab, preserving any restored chats.
-                        if not pages and context.pages and context.pages[0].url == "about:blank":
-                            page = context.pages[0]
-                        else:
-                            page = context.new_page()
-                        pages.append(page)
-                        new_chat(page, login_timeout)
-                        paths = [item.upload for item in batch]
-                        choose_files(page, paths)
-                        wait_for_upload(page, paths, upload_timeout)
-                        print(f"Chat {len(pages)}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
-                        if not attach_only:
-                            send_prompt(page, prompt, paths, upload_timeout)
-                            print(f"Đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}")
-                            if not keep_images:
-                                kept.extend(delete_uploaded(batch))
-                    if attach_only:
-                        print("Ảnh đang đính kèm, chưa gửi. Giữ nguyên toàn bộ ảnh gốc.")
-                except Exception as exc:
-                    print(f"Lỗi: {exc}\nGiữ tab và ảnh chưa xác nhận để kiểm tra.", file=sys.stderr)
-                    keep_tabs_open(pages)
-                    raise
-                if kept:
-                    keep_tabs_open(pages)
-                    raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
-                print("Hoàn tất. Các tab Gemini vẫn mở để bạn xem kết quả.")
+        with open_browser(profile, login_timeout) as context:
+            print("Đã kết nối Chrome/Edge sau bước đăng nhập như copy_info_on_gemini.")
+            print(f"Phiên đăng nhập lưu trong {profile.resolve()}.")
+            try:
+                for start in range(0, len(images), batch_size):
+                    batch = images[start:start + batch_size]
+                    # Reuse the launcher's empty tab, preserving any restored chats.
+                    if not pages and context.pages and context.pages[0].url == "about:blank":
+                        page = context.pages[0]
+                    else:
+                        page = context.new_page()
+                    pages.append(page)
+                    new_chat(page, login_timeout)
+                    paths = [item.upload for item in batch]
+                    choose_files(page, paths)
+                    wait_for_upload(page, paths, upload_timeout)
+                    print(f"Chat {len(pages)}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
+                    if not attach_only:
+                        send_prompt(page, prompt, paths, upload_timeout)
+                        print(f"Đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}")
+                        if not keep_images:
+                            kept.extend(delete_uploaded(batch))
+                if attach_only:
+                    print("Ảnh đang đính kèm, chưa gửi. Giữ nguyên toàn bộ ảnh gốc.")
+            except Exception as exc:
+                print(f"Lỗi: {exc}\nGiữ tab và ảnh chưa xác nhận để kiểm tra.", file=sys.stderr)
                 keep_tabs_open(pages)
+                raise
+            if kept:
+                keep_tabs_open(pages)
+                raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
+            print("Hoàn tất. Các tab Gemini vẫn mở để bạn xem kết quả.")
+            keep_tabs_open(pages)
     except PlaywrightError as exc:
         raise GeminiBrowserError(
             f"Lỗi trình duyệt: {exc}\n"
-            "Cài Chromium bằng python -m playwright install chromium trong đúng môi trường Python, "
-            "hoặc mở lại start_gemini.bat để tự cài. Đóng phiên khác dùng cùng --profile nếu đang mở. "
+            "Đóng cửa sổ của script rồi chạy lại start_gemini.bat. "
+            "Không chạy đồng thời công cụ khác dùng cùng --profile. "
             "Ảnh chưa xác nhận được giữ lại."
         ) from exc
