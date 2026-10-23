@@ -27,6 +27,8 @@ echo Đang cài thư viện cho Gemini...
 if errorlevel 1 goto failed
 
 :chromium
+".venv-gemini\Scripts\python.exe" -c "import sys; raise SystemExit(0 if any(a == '--polygon-python' or a.startswith('--polygon-python=') or a == '--browser-info' or a == '--dry-run' or a == '--help' or a == '-h' for a in sys.argv[1:]) else 1)" %*
+if not errorlevel 1 goto run
 ".venv-gemini\Scripts\python.exe" -c "from pathlib import Path; from playwright.sync_api import sync_playwright; p = sync_playwright().start(); ready = Path(p.chromium.executable_path).is_file(); p.stop(); raise SystemExit(0 if ready else 1)" >nul 2>&1
 if not errorlevel 1 goto run
 echo Đang cài Chromium như nhánh copy_info_on_polygon...

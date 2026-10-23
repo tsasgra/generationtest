@@ -35,6 +35,43 @@ chạy lại `start_gemini.bat` không kèm các tùy chọn này.
 Nếu Google chuyển tới trang “Couldn't sign you in”, script báo ngay và giữ nguyên
 ảnh để bạn kiểm tra; không báo thành công hoặc tự chuyển sang trình duyệt khác.
 
+### Dùng đúng bản Chromium đã cài cho Polygon
+
+`git pull` chỉ cập nhật mã nguồn; nó không mang theo Python, phiên bản Playwright,
+Chromium hay phiên đăng nhập trên máy. Nhánh Polygon ưu tiên `.venv\Scripts\python.exe`,
+rồi mới dùng Python hệ thống; nhánh Gemini dùng `.venv-gemini`. Vì vậy, cùng một lệnh
+mở trình duyệt vẫn có thể chạy hai bản Chromium khác nhau.
+
+Giữ bản Polygon đang dùng trên máy và chỉ định **đúng Python mà bản đó sử dụng**:
+
+```bat
+start_gemini.bat --polygon-python "C:\duong-dan\copy_info_on_polygon\.venv\Scripts\python.exe" --browser-info
+start_gemini.bat --polygon-python "C:\duong-dan\copy_info_on_polygon\.venv\Scripts\python.exe"
+```
+
+Thay đường dẫn ví dụ bằng đường dẫn thật. Nếu bản Polygon không có `.venv` và dùng
+Python hệ thống, lấy đường dẫn từ `py -3 -c "import sys; print(sys.executable)"`
+hoặc `python -c "import sys; print(sys.executable)"`, tương ứng với lệnh nó đã dùng.
+Để xem môi trường mặc định của Gemini, chạy `start_gemini.bat --browser-info`.
+Lệnh này in Python, phiên bản Playwright, đường dẫn Chromium và kiểm tra file
+trình duyệt đã cài; không cần ảnh, không mở trình duyệt và không thử đăng nhập.
+
+Khi có `--polygon-python`, việc nhận diện/chuyển ảnh vẫn chạy trong `.venv-gemini`;
+phần mở trình duyệt và gửi ảnh chạy bằng Python đã chỉ định cùng Playwright/Chromium
+của nó. Không cài hoặc cập nhật thư viện trong môi trường Polygon. Python nguồn phải
+có Playwright và Chromium đã cài. Nếu thiếu hoặc chạy lỗi, script báo lỗi thay vì
+tự dùng một trình duyệt khác. Profile Gemini vẫn nằm ở `.gemini-browser-polygon`;
+không sao chép cookie, mật khẩu hoặc dữ liệu đăng nhập từ Polygon.
+Khi nhấn Ctrl+C, script chờ tiến trình trình duyệt kết thúc rồi mới dọn file tạm;
+nếu tiến trình chưa thoát, script báo để bạn đóng cửa sổ của lần chạy đó.
+
+Đã kiểm tra mã nhánh Polygon: không có cơ chế riêng để đăng nhập Google, thay
+user-agent, bỏ kiểm tra TLS hay xử lý CAPTCHA. Key/secret và chữ ký SHA-512 trong
+[`polygon_tool/api.py`](https://github.com/tsasgra/generationtest/blob/0b0b243ab835ce9f060cf5007a331b431697101d/polygon_tool/api.py)
+chỉ dùng xác thực **Polygon API**. Dùng đúng Chromium giúp kiểm tra khác biệt môi
+trường, nhưng không bảo đảm Google chấp nhận đăng nhập. Nếu cả Chrome/Edge mở bằng
+tay cũng bị từ chối, chỉ thông báo này chưa đủ để xác định nguyên nhân.
+
 ## Khi nào ảnh bị xóa?
 
 Mỗi nhóm tối đa **10 ảnh** được gửi vào một chat mới, kèm nội dung mặc định
@@ -101,9 +138,11 @@ GitHub chỉ chứa mã chạy, thư viện cần cài, file `.bat`, hướng d�
 Ảnh, profile đăng nhập, môi trường Python, file test/example đều được loại khỏi Git.
 Với `--input`/`--profile` tự đặt, dùng đường dẫn ngoài repo hoặc bổ sung vào `.gitignore`.
 
-23 kiểm thử offline đã đạt, kiểm tra cấu hình mở Chromium giống nhánh tham chiếu, lưu phiên
+Các kiểm thử offline kiểm tra cấu hình mở Chromium giống nhánh tham chiếu, lưu phiên
 qua các lần mở, nhận diện trang Google từ chối đăng nhập, gửi/tải lại chat bằng trang
-mô phỏng, xóa đúng ảnh đã xác nhận và giữ ảnh lỗi/thay đổi.
+mô phỏng, xóa đúng ảnh đã xác nhận và giữ ảnh lỗi/thay đổi. Phần dùng Python của
+Polygon được kiểm tra truyền dữ liệu ảnh, giữ thông tin đối chiếu trước khi xóa,
+báo lỗi môi trường, mã thoát và chạy mà không cần thư viện giải mã ảnh trong Python nguồn.
 **Chưa xác minh end-to-end trên Gemini thật hoặc chạy `.bat` trên Windows thật**:
 môi trường phát triển không cho truy cập Gemini. Nếu giao diện Gemini thay đổi
 khiến không xác nhận được ảnh, script báo lỗi và giữ nguyên các ảnh chưa xác nhận.
