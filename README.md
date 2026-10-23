@@ -57,7 +57,8 @@ cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 ## Khi nào ảnh bị xóa?
 
 Mỗi nhóm tối đa **10 ảnh** được gửi vào một chat mới, kèm nội dung mặc định
-`Ảnh được tải lên từ thư mục img.`. Trước khi bấm Gửi/submit, script phải thấy đủ
+`apply polygon setter skill`, chỉ đúng một dòng này, không thêm nội dung khác.
+Trước khi bấm Gửi/submit, script phải thấy đủ
 ảnh xem trước đã tải được, không còn tiến trình/trạng thái đang tải hoặc xử lý và
 nút Gửi đang bật. Các điều kiện phải ổn định ít nhất một giây. Script kiểm tra lại
 sau khi điền nội dung gửi kèm; chỉ thấy tên file chưa đủ để submit. Nếu hết
@@ -83,7 +84,7 @@ Chỉ thấy ảnh trong ô soạn thảo chưa đủ điều kiện xóa.
 
 ```bat
 start_gemini.bat --dry-run
-start_gemini.bat --prompt "Hãy đọc nội dung trong các ảnh này."
+start_gemini.bat --prompt "apply polygon setter skill"
 start_gemini.bat --keep-images
 start_gemini.bat --attach-only
 ```
