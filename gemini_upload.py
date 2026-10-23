@@ -8,9 +8,8 @@ from pathlib import Path
 import sys
 import tempfile
 
-from gemini_tool.browser import GeminiBrowserError, upload_images, validate_cdp_url
+from gemini_tool.browser import GeminiBrowserError, upload_images
 from gemini_tool.images import ImageInputError, collect_images, prepare_images
-from gemini_tool.session import BrowserSessionError, prepare_session
 
 ROOT = Path(__file__).resolve().parent
 
@@ -27,11 +26,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input", type=Path, default=ROOT / "img", help="Thư mục ảnh (mặc định: img cạnh script).")
     parser.add_argument("--recursive", action="store_true", help="Đọc cả các thư mục con.")
     parser.add_argument("--dry-run", action="store_true", help="Kiểm tra/chuyển ảnh offline, không mở Gemini.")
-    parser.add_argument("--browser", choices=("auto", "chrome", "msedge"), default="auto")
-    parser.add_argument("--browser-path", type=Path, help="Đường dẫn Chrome/Edge nếu không tìm thấy tự động.")
-    parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-cdp", help="Profile riêng lưu phiên đăng nhập.")
-    parser.add_argument("--login", action="store_true", help="Đăng nhập lại trước khi kết nối điều khiển.")
-    parser.add_argument("--cdp-url", type=validate_cdp_url, help="Kết nối Chrome bạn tự mở qua CDP localhost.")
+    parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-polygon",
+                        help="Profile Chromium riêng; cùng cách mở với copy_info_on_polygon.")
     parser.add_argument("--login-timeout", type=positive_number, default=300, help="Thời gian chờ đăng nhập, giây.")
     parser.add_argument("--upload-timeout", type=positive_number, default=180, help="Thời gian chờ tải ảnh, giây.")
     parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10, help="Tối đa 10 ảnh mỗi chat mới.")
@@ -42,8 +38,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.prompt is not None and not args.prompt.strip():
         parser.error("--prompt không được rỗng.")
-    if args.login and args.cdp_url:
-        parser.error("Không dùng --login cùng --cdp-url; đóng phiên CDP trước khi đăng nhập lại.")
     try:
         files = collect_images(args.input.resolve(), args.recursive)
         # Validate every image before creating any chats. Temp files stay alive
@@ -56,17 +50,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.dry_run:
                 print("Kiểm tra offline thành công. Chưa mở Gemini hoặc tải ảnh lên mạng.")
                 return 0
-            endpoint = args.cdp_url or prepare_session(
-                args.profile, args.browser, args.browser_path, login=args.login,
-            )
             upload_images(
-                images, cdp_url=endpoint,
+                images, profile=args.profile,
                 login_timeout=args.login_timeout, upload_timeout=args.upload_timeout,
                 batch_size=args.batch_size, prompt=args.prompt,
                 keep_images=args.keep_images, attach_only=args.attach_only,
             )
         return 0
-    except (ImageInputError, GeminiBrowserError, BrowserSessionError, OSError) as exc:
+    except (ImageInputError, GeminiBrowserError, OSError) as exc:
         print(f"Lỗi: {exc}", file=sys.stderr)
         return 1
     except ImportError as exc:

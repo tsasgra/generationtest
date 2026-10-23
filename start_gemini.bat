@@ -21,9 +21,16 @@ if errorlevel 1 goto failed
 
 :dependencies
 ".venv-gemini\Scripts\python.exe" -c "import playwright.sync_api, PIL, pillow_heif, resvg_py, rawpy" >nul 2>&1
-if not errorlevel 1 goto run
+if not errorlevel 1 goto chromium
 echo Đang cài thư viện cho Gemini...
 ".venv-gemini\Scripts\python.exe" -m pip install -r requirements-gemini.txt
+if errorlevel 1 goto failed
+
+:chromium
+".venv-gemini\Scripts\python.exe" -c "from pathlib import Path; from playwright.sync_api import sync_playwright; p = sync_playwright().start(); ready = Path(p.chromium.executable_path).is_file(); p.stop(); raise SystemExit(0 if ready else 1)" >nul 2>&1
+if not errorlevel 1 goto run
+echo Đang cài Chromium như nhánh copy_info_on_polygon...
+".venv-gemini\Scripts\python.exe" -m playwright install chromium
 if errorlevel 1 goto failed
 
 :run
