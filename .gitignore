@@ -12,3 +12,4 @@ examples/
 .gemini-browser*/
 img/*
 !img/.gitkeep
+/.gemini-stop-request

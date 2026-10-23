@@ -6,30 +6,43 @@ set "GEMINI_EXIT_CODE=1"
 set "PYTHONUTF8=1"
 pushd "%~dp0"
 if errorlevel 1 goto folder_error
+if exist ".gemini-stop-request\" goto failed
+if exist ".gemini-stop-request" del /q ".gemini-stop-request"
+if exist ".gemini-stop-request" goto failed
 if exist ".venv-gemini\Scripts\python.exe" goto dependencies
 
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 goto try_python
-py -3 -m venv .venv-gemini
+if exist ".gemini-stop-request" goto stopped
+py -3 -m venv "%~dp0.venv-gemini"
 if errorlevel 1 goto failed
 goto dependencies
 
 :try_python
 python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 goto python_missing
-python -m venv .venv-gemini
+if exist ".gemini-stop-request" goto stopped
+python -m venv "%~dp0.venv-gemini"
 if errorlevel 1 goto failed
 
 :dependencies
+if exist ".gemini-stop-request" goto stopped
 ".venv-gemini\Scripts\python.exe" -c "import playwright.sync_api, PIL, pillow_heif, resvg_py, rawpy" >nul 2>&1
 if not errorlevel 1 goto run
+if exist ".gemini-stop-request" goto stopped
 echo Đang cài thư viện cho Gemini...
-".venv-gemini\Scripts\python.exe" -m pip install -r requirements-gemini.txt
+".venv-gemini\Scripts\python.exe" -m pip install -r "%~dp0requirements-gemini.txt"
 if errorlevel 1 goto failed
 
 :run
-".venv-gemini\Scripts\python.exe" -u gemini_upload.py %*
+if exist ".gemini-stop-request" goto stopped
+".venv-gemini\Scripts\python.exe" -u "%~dp0gemini_upload.py" %*
 set "GEMINI_EXIT_CODE=%errorlevel%"
+goto done
+
+:stopped
+echo Đã hủy khởi động theo yêu cầu Stop.
+set "GEMINI_EXIT_CODE=130"
 goto done
 
 :python_missing

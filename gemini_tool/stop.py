@@ -1,0 +1,254 @@
+"""Stop this Windows tool and clear connection state without removing images/login."""
+from __future__ import annotations
+
+import argparse
+import json
+import ntpath
+import os
+from pathlib import Path, PureWindowsPath
+import re
+import stat
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+PYTHON_NAME = re.compile(r"(?:py|pythonw?|python\d+(?:\.\d+)*)\.exe", re.I)
+PROCESS_QUERY = r"""
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -match '^(py|pythonw?|python\d+(\.\d+)*|chrome|msedge)\.exe$' } |
+    Select-Object ProcessId, Name, CommandLine,
+        @{Name='Created'; Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} |
+    ConvertTo-Json -Compress
+"""
+
+
+def windows_args(command: str) -> list[str]:
+    """Parse Windows quoting, including backslashes before quotes."""
+    result = []
+    index = 0
+    while index < len(command):
+        while index < len(command) and command[index] in " \t":
+            index += 1
+        if index == len(command):
+            break
+        value = []
+        quoted = False
+        while index < len(command) and (quoted or command[index] not in " \t"):
+            slashes = 0
+            while index < len(command) and command[index] == "\\":
+                slashes += 1
+                index += 1
+            if index < len(command) and command[index] == '"':
+                value.append("\\" * (slashes // 2))
+                if slashes % 2:
+                    value.append('"')
+                elif quoted and index + 1 < len(command) and command[index + 1] == '"':
+                    value.append('"')
+                    index += 1
+                else:
+                    quoted = not quoted
+                index += 1
+            else:
+                value.append("\\" * slashes)
+                if index < len(command) and (quoted or command[index] not in " \t"):
+                    value.append(command[index])
+                    index += 1
+        result.append("".join(value))
+    return result
+
+
+def python_arguments(process: dict) -> list[str]:
+    if not PYTHON_NAME.fullmatch(process.get("Name") or ""):
+        return []
+    arguments = windows_args(process.get("CommandLine") or "")[1:]
+    index = 0
+    while index < len(arguments):
+        value = arguments[index]
+        if value == "--":
+            rest = arguments[index + 1:]
+            return rest if rest and not rest[0].startswith("-") else []
+        if value == "-m" or not value.startswith("-"):
+            return arguments[index:]
+        if value in {"-W", "-X"}:
+            index += 1
+        elif not (value.startswith(("-W", "-X"))
+                  or re.fullmatch(r"-[uBEIsSOqvPbdR]+|-[23](?:\.\d+)?(?:-(?:32|64))?", value)):
+            # Never mistake code passed via -c/-uc or a module name for a
+            # script filename merely appearing in that program's arguments.
+            return []
+        index += 1
+    return []
+
+
+def option(arguments: list[str], name: str) -> str | None:
+    for index, value in enumerate(arguments):
+        if value == name and index + 1 < len(arguments):
+            return arguments[index + 1]
+        if value.startswith(name + "="):
+            return value[len(name) + 1:]
+    return None
+
+
+def path_key(value) -> str:
+    return ntpath.normcase(ntpath.normpath(str(value)))
+
+
+def is_uploader(process: dict) -> bool:
+    arguments = python_arguments(process)
+    return bool(arguments and PureWindowsPath(arguments[0]).name.casefold() == "gemini_upload.py")
+
+
+def is_tool_process(process: dict, directory: Path) -> bool:
+    if is_uploader(process):
+        return True
+    arguments = python_arguments(process)
+    if arguments[:2] == ["-m", "venv"]:
+        return len(arguments) == 3 and path_key(arguments[2]) == path_key(directory / ".venv-gemini")
+    if arguments[:3] == ["-m", "pip", "install"]:
+        requirement = option(arguments[3:], "-r") or option(arguments[3:], "--requirement")
+        return requirement is not None and path_key(requirement) == path_key(directory / "requirements-gemini.txt")
+    return False
+
+
+def profile_roots(directory: Path, processes: list[dict], extra: list[Path]) -> set[Path]:
+    roots = {directory / ".gemini-browser-native", *extra}
+    roots.update(path for path in directory.glob(".gemini-browser*") if path.is_dir())
+    for process in processes:
+        if not is_uploader(process):
+            continue
+        arguments = python_arguments(process)
+        script = arguments[0]
+        base = Path(script).parent if ntpath.isabs(script) else directory
+        profile = option(arguments[1:], "--profile")
+        selected = Path(profile) if profile else base / ".gemini-browser-native"
+        roots.add(selected if selected.is_absolute() else base / selected)
+    return {path.absolute() for path in roots}
+
+
+def is_tool_browser(process: dict, roots: set[Path]) -> bool:
+    if (process.get("Name") or "").casefold() not in {"chrome.exe", "msedge.exe"}:
+        return False
+    profile = option(windows_args(process.get("CommandLine") or "")[1:], "--user-data-dir")
+    return profile is not None and path_key(profile) in {
+        path_key(root / name) for root in roots for name in ("chrome", "edge")
+    }
+
+
+def list_processes() -> list[dict]:
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", PROCESS_QUERY],
+        capture_output=True, encoding="utf-8-sig", timeout=30, check=False,
+    )
+    if result.returncode:
+        raise RuntimeError("Không đọc được danh sách tiến trình Windows.")
+    rows = json.loads(result.stdout) if result.stdout.strip() else []
+    rows = [rows] if isinstance(rows, dict) else rows
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise RuntimeError("Danh sách tiến trình Windows không hợp lệ.")
+    return rows
+
+
+def same_process(expected: dict, current: dict) -> bool:
+    pid = expected.get("ProcessId")
+    return (type(pid) is int and pid > 0 and pid != os.getpid()
+            and bool(expected.get("Created"))
+            and all(current.get(key) == expected.get(key)
+                    for key in ("ProcessId", "Created", "Name", "CommandLine")))
+
+
+def terminate_tree(target: dict) -> bool:
+    if not same_process(target, target):
+        raise RuntimeError("Thiếu thông tin xác minh tiến trình; chưa dừng hoặc xóa trạng thái.")
+    if not any(same_process(target, row) for row in list_processes()):
+        return False
+    pid = target["ProcessId"]
+    subprocess.run(["taskkill.exe", "/PID", str(pid), "/T", "/F"],
+                   capture_output=True, timeout=30, check=False)
+    if any(same_process(target, row) for row in list_processes()):
+        raise RuntimeError(f"Chưa dừng được PID {pid}; chưa xóa trạng thái. Kiểm tra quyền chạy tiến trình.")
+    return True
+
+
+def stop_all(directory: Path, extra: list[Path]) -> tuple[int, set[Path]]:
+    roots = profile_roots(directory, [], extra)
+    stopped = 0
+    # Re-scan after terminating uploaders to catch detached/reused browser
+    # processes and children that appeared during the first process snapshot.
+    for _ in range(3):
+        processes = list_processes()
+        roots.update(profile_roots(directory, processes, extra))
+        tools = [row for row in processes if is_tool_process(row, directory)]
+        browsers = [row for row in processes if is_tool_browser(row, roots)]
+        if not tools and not browsers:
+            return stopped, roots
+        for target in tools + browsers:
+            stopped += terminate_tree(target)
+    processes = list_processes()
+    if any(is_tool_process(row, directory) or is_tool_browser(row, roots) for row in processes):
+        raise RuntimeError("Vẫn còn tiến trình của công cụ; chưa xóa trạng thái. Bấm Stop lại.")
+    return stopped, roots
+
+
+def ordinary_directory(path: Path) -> bool:
+    if not path.is_dir() or path.is_symlink():
+        return False
+    return not (getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def reset_connections(roots: set[Path]) -> int:
+    removed = 0
+    for root in sorted(roots):
+        if not ordinary_directory(root):
+            continue
+        for name in ("chrome", "edge"):
+            browser = root / name
+            if not ordinary_directory(browser):
+                continue
+            state = browser / "gemini-export-session.json"
+            try:
+                state.unlink()
+                removed += 1
+            except FileNotFoundError:
+                pass
+    return removed
+
+
+def request_stop(directory: Path) -> None:
+    # Tell an in-flight BAT launcher not to advance from dependency checks into
+    # installation/upload. The next explicit Start clears this cancellation.
+    try:
+        with (directory / ".gemini-stop-request").open("x", encoding="utf-8") as stream:
+            stream.write("stop\n")
+    except FileExistsError:
+        pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Dừng Gemini uploader và xóa trạng thái kết nối cục bộ.")
+    parser.add_argument("--profile", type=Path, action="append", default=[],
+                        help="Profile riêng bên ngoài repo cần dừng/dọn; có thể truyền nhiều lần.")
+    args = parser.parse_args(argv)
+    if sys.platform != "win32":
+        print("stop.bat chỉ dùng trên Windows.", file=sys.stderr)
+        return 1
+    try:
+        request_stop(ROOT)
+        stopped, roots = stop_all(ROOT, args.profile)
+        removed = reset_connections(roots)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        print(f"Lỗi khi dừng/dọn trạng thái: {exc}", file=sys.stderr)
+        return 1
+    print(f"Đã dừng {stopped} tiến trình gốc của uploader/cài đặt/trình duyệt cùng các tiến trình con.")
+    print(f"Đã xóa {removed} file trạng thái kết nối/checkpoint cục bộ.")
+    print("Giữ nguyên ảnh trong img và phiên đăng nhập Google. Bấm start_gemini.bat để chạy lại.")
+    print("Tin nhắn Gemini đã nhận vẫn tồn tại; Stop không thu hồi ảnh đã gửi.")
+    return 0
+
+
+if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    raise SystemExit(main())

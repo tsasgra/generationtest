@@ -23,6 +23,39 @@ Lần sau chỉ cần thêm ảnh vào `img` và chạy lại. Phiên đăng nh�
 `.gemini-browser-native/chrome` hoặc `.gemini-browser-native/edge`, giống nhánh `copy_info_on_gemini`.
 Không chạy hai bản script cùng lúc hoặc chỉnh sửa/di chuyển ảnh khi đang chạy.
 
+## Dừng và xóa trạng thái bằng stop.bat
+
+Bấm đúp **`stop.bat`** để dừng uploader, các tiến trình con và Chrome/Edge dùng
+profile riêng của script. File Start đang kiểm tra/cài thư viện cũng được hủy,
+không tự chạy tiếp sang bước tải ảnh. Sau khi dừng thành công, Stop xóa file
+`gemini-export-session.json` trong các profile riêng để lần sau mở kết nối mới.
+Nhánh này chưa có checkpoint tiếp tục upload; đây là trạng thái kết nối cục bộ.
+File trạng thái hỏng hoặc còn lại sau khi uploader đã thoát cũng được dọn.
+
+**Giữ nguyên ảnh trong `img/`, mã nguồn, thư viện đã cài và phiên đăng nhập Google.**
+Stop không xóa lịch sử chat hoặc thu hồi ảnh mà Gemini đã nhận. Các cửa sổ BAT
+đang chờ nhấn phím có thể vẫn mở. Bấm lại `start_gemini.bat` để bắt đầu lần chạy mới.
+Không bấm Start trong khi Stop vẫn đang xử lý.
+
+Stop nhận diện các lệnh Python thực sự chạy `gemini_upload.py`, kể cả bản sao
+repository khác, rồi dừng cây tiến trình bằng `taskkill /T /F`. Các bước cài đặt
+được nhận diện theo đúng đường dẫn của repository chứa Stop. Trình duyệt được
+nhận diện theo `--user-data-dir` của profile riêng; Python và trình duyệt cá nhân
+khác không bị dừng theo tên chung. Nếu không dừng được tiến trình, Stop báo lỗi
+và chưa xóa trạng thái kết nối.
+
+Các profile `.gemini-browser*` ngay trong repository được tìm tự động. Profile
+tùy chỉnh của uploader đang chạy cũng được nhận diện. Nếu dùng profile ở ngoài
+repo và uploader đã thoát, truyền lại đường dẫn đó:
+
+```bat
+stop.bat --profile "D:\GeminiProfile"
+```
+
+Stop cần Python 3.10+ và Windows PowerShell có sẵn; không cài thêm thư viện.
+Nếu cửa sổ của công cụ chạy bằng quyền khác, Stop cần quyền truy cập tiến trình
+tương ứng. Giữ file `gemini_tool/stop.py` cạnh mã nguồn khi cập nhật repository.
+
 ## Trình duyệt từ copy_info_on_gemini
 
 Phần mở trình duyệt được chuyển từ
@@ -130,6 +163,10 @@ Kiểm thử bằng Chromium trên trang mô phỏng bao gồm menu thêm ảnh 
 tải chậm, ảnh xem trước hỏng, nút Gửi bị khóa, lỗi/hạn mức, submit rồi tải lại chat,
 chế độ chỉ đính kèm và việc giữ/xóa đúng ảnh gốc. File kiểm thử và ảnh mẫu chỉ
 được giữ trong `work/`, không đưa lên GitHub.
+
+Kiểm thử Stop mô phỏng việc dừng đúng cây tiến trình/profile, PID bị tái sử dụng,
+lỗi quyền truy cập, dọn trạng thái hỏng và giữ ảnh cùng dữ liệu đăng nhập.
+Phần dừng tiến trình Windows chưa được chạy trực tiếp trên Windows thật.
 
 Script test cục bộ đã truy cập Gemini thật ở phiên khách: ảnh vào vùng xem trước
 qua ô chọn ảnh riêng nhưng dừng ở 50% sau 180 giây; chưa xác nhận submit thành công.
