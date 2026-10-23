@@ -6,10 +6,10 @@ from pathlib import Path
 import re
 import sys
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from .images import PreparedImage, delete_uploaded
-from .native import close_native_browser, start_native_browser
+from .native import close_native_browser, start_native_browser, wait_for_manual_login
 
 GEMINI_URL = "https://gemini.google.com/app?hl=en"
 EDITOR = 'rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]'
@@ -25,6 +25,8 @@ LOCAL_UPLOAD_NAME = re.compile(
 PLUS_ICON = re.compile(r"^\s*(?:add|add_2|add_circle|add_circle_outline|attach_file|plus|\+)\s*$")
 UPLOAD_MENU = '[role="menu"], .cdk-overlay-container, .mat-mdc-menu-panel, [data-test-id="upload-menu"]'
 SEND_NAME = re.compile(r"^(send|send message|submit|gửi|gửi tin nhắn)(\s.*)?$", re.I)
+ACCOUNT_NAME = re.compile(r"^(Google Account|Tài khoản Google)(\s*:|\s*$)", re.I)
+SIGN_IN_NAME = re.compile(r"^\s*(sign in|đăng nhập)\s*$", re.I)
 
 
 class GeminiBrowserError(RuntimeError):
@@ -32,25 +34,30 @@ class GeminiBrowserError(RuntimeError):
 
 
 @contextmanager
-def open_browser(profile: Path):
-    """Open Gemini directly; an editable guest composer is sufficient."""
+def open_browser(profile: Path, login_timeout: float):
+    """Use copy_info_on_gemini's native login before connecting automation."""
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
+    login_url = "https://accounts.google.com/ServiceLogin?" + urlencode({
+        "continue": GEMINI_URL, "followup": GEMINI_URL, "passive": "1209600",
+    })
     try:
-        port, session_file = start_native_browser(GEMINI_URL, profile)
+        port, session_file, old_tabs = start_native_browser(login_url, profile)
+        wait_for_manual_login(port, old_tabs, timeout=login_timeout)
     except (OSError, ValueError) as exc:
         raise GeminiBrowserError(f"{exc}\nChưa tải hoặc xóa ảnh của lần chạy này.") from exc
+    # Do not start the Playwright driver or attach CDP during Google sign-in.
     with sync_playwright() as playwright:
         try:
             browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=20000)
         except PlaywrightError as exc:
             raise GeminiBrowserError(
-                "Không kết nối được Chrome/Edge vừa mở. Đóng cửa sổ của script rồi chạy lại. "
+                "Không kết nối được Chrome/Edge vừa đăng nhập. Đóng cửa sổ của script rồi chạy lại. "
                 "Chưa tải hoặc xóa ảnh."
             ) from exc
         try:
             if not browser.contexts:
-                raise GeminiBrowserError("Không tìm thấy phiên Chrome/Edge vừa mở; ảnh được giữ nguyên.")
+                raise GeminiBrowserError("Không tìm thấy phiên Chrome/Edge vừa đăng nhập; ảnh được giữ nguyên.")
             yield browser.contexts[0]
         finally:
             close_native_browser(browser, session_file)
@@ -72,23 +79,29 @@ def wait_for_editor(page, timeout: float):
                 )
             if urlsplit(page.url).hostname == "gemini.google.com":
                 editor = page.locator(EDITOR).first
-                if editor.is_visible() and editor.is_editable():
+                account = _first_ready(page.get_by_role("button", name=ACCOUNT_NAME).or_(
+                    page.get_by_role("link", name=ACCOUNT_NAME)))
+                sign_in = _first_ready(page.get_by_role("button", name=SIGN_IN_NAME).or_(
+                    page.get_by_role("link", name=SIGN_IN_NAME)))
+                # A guest also has an editable composer. Require the account
+                # control, not merely a redirect back to gemini.google.com.
+                if account is not None and sign_in is None and editor.is_visible() and editor.is_editable():
                     return editor
         except PlaywrightError:
             # The user may be completing Google sign-in/navigation.
             pass
         page.wait_for_timeout(300)
     raise GeminiBrowserError(
-        "Hết thời gian chờ ô chat Gemini. Kiểm tra kết nối hoặc hoàn tất màn hình chào mừng. "
-        "Có thể tăng --browser-timeout. Không cần đăng nhập để thử phiên khách."
+        "Hết thời gian chờ ô chat. Hãy đăng nhập Google, hoàn tất màn hình chào mừng "
+        "và kiểm tra tài khoản có quyền dùng Gemini. Có thể tăng --login-timeout."
     )
 
 
 def new_chat(page, timeout: float):
     page.goto(GEMINI_URL, wait_until="domcontentloaded", timeout=60000)
     wait_for_editor(page, timeout)
-    # A restored tab can open an old conversation. Require the blank /app
-    # composer before attaching files, with or without a signed-in account.
+    # A login redirect can restore an old conversation. Navigate again once
+    # authenticated and require the blank /app composer before attaching files.
     page.goto(GEMINI_URL, wait_until="domcontentloaded", timeout=60000)
     editor = wait_for_editor(page, timeout)
     if (urlsplit(page.url).path.rstrip("/") != "/app"
@@ -178,14 +191,13 @@ def choose_files(page, paths: list[Path], timeout: float = 15):
                     option.click()
                     selected_upload = True
                     continue
-                if opened_menu:
-                    # Guest layouts can disable the document/tools menu while
-                    # retaining an enabled image input. Supply the local image
-                    # there instead of treating the sign-in banner as a gate.
-                    file_input = _file_input(page)
-                    if file_input is not None:
-                        file_input.set_input_files(values)
-                        return
+                if opened_menu and _first_ready(page.locator(UPLOAD_MENU).get_by_text(re.compile(
+                    r"sign in to try tools|đăng nhập để (?:dùng thử|thử|sử dụng)", re.I,
+                ))) is not None:
+                    raise GeminiBrowserError(
+                        "Gemini yêu cầu đăng nhập Google để tải tệp. "
+                        "Hãy đăng nhập trong cửa sổ của script rồi chạy lại; chưa tải, gửi hoặc xóa ảnh."
+                    )
                 if not opened_menu:
                     composer = _composer(page)
                     if composer is not None:
@@ -296,7 +308,8 @@ def wait_for_upload(page, paths: list[Path], timeout: float, *, require_send: bo
     )
 
 
-SENT_MESSAGE = r"""({editorSelector, prompt, names}) => {
+SAVED_MESSAGE = r"""({editorSelector, prompt, names}) => {
+    if (!/^\/app\/[^/]+/.test(location.pathname)) return false;
     const editor = document.querySelector(editorSelector);
     if (!editor || editor.innerText.trim()) return false;
     const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
@@ -321,16 +334,7 @@ SENT_MESSAGE = r"""({editorSelector, prompt, names}) => {
 }"""
 
 
-GUEST_REPLY = r"""() => {
-    const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
-    return [...document.querySelectorAll(
-        'model-response message-content, model-response .markdown, [data-message-author-role="assistant"]'
-    )].some(el => visible(el) && el.innerText.trim());
-}"""
-
-
-def send_prompt(page, prompt: str, paths: list[Path], timeout: float) -> bool:
-    """Confirm submission; return whether it survives a saved-chat reload."""
+def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
     editor = page.locator(EDITOR).first
     editor.fill(prompt)
     # Filling the prompt can update the composer. Recheck the attachments and
@@ -339,24 +343,14 @@ def send_prompt(page, prompt: str, paths: list[Path], timeout: float) -> bool:
     button.click(timeout=timeout * 1000)
     try:
         arguments = {"editorSelector": EDITOR, "prompt": prompt, "names": [p.name for p in paths]}
-        page.wait_for_function(SENT_MESSAGE, arg=arguments, timeout=timeout * 1000)
-        guest = page.evaluate(r"""() => [...document.querySelectorAll('a, button')].some(el =>
-            el.getClientRects().length && /^(sign in|đăng nhập)$/i.test(el.innerText.trim()))""")
-        if guest or not re.match(r"^/app/[^/]+", urlsplit(page.url).path):
-            # Guest conversations may disappear on reload. Require a server
-            # reply instead, leave the tab open, and keep the original files.
-            page.wait_for_function(GUEST_REPLY, timeout=timeout * 1000)
-            page.wait_for_function(SENT_MESSAGE, arg=arguments, timeout=timeout * 1000)
-            return False
+        page.wait_for_function(SAVED_MESSAGE, arg=arguments, timeout=timeout * 1000)
         # A cleared composer/optimistic preview alone is not a durable upload.
         # Require the sent images again after fetching the conversation anew.
         page.reload(wait_until="domcontentloaded", timeout=timeout * 1000)
-        page.wait_for_function(SENT_MESSAGE, arg=arguments, timeout=timeout * 1000)
-        return True
+        page.wait_for_function(SAVED_MESSAGE, arg=arguments, timeout=timeout * 1000)
     except Exception as exc:
         raise GeminiBrowserError(
-            "Đã bấm Gửi nhưng chưa xác nhận được đủ ảnh và phản hồi trong chat khách, "
-            "hoặc chưa xác nhận được chat đã lưu sau khi tải lại. "
+            "Đã bấm Gửi nhưng chưa xác nhận được đủ ảnh trong chat sau khi tải lại. "
             "Giữ nguyên ảnh gốc. Kiểm tra tab hiện tại trước khi chạy lại để tránh gửi trùng."
         ) from exc
 
@@ -373,7 +367,7 @@ def keep_tabs_open(pages):
 
 
 def upload_images(images: list[PreparedImage], *, profile: Path,
-                  browser_timeout: float, upload_timeout: float,
+                  login_timeout: float, upload_timeout: float,
                   batch_size: int, prompt: str, keep_images: bool = False,
                   attach_only: bool = False):
     from playwright.sync_api import Error as PlaywrightError
@@ -381,9 +375,9 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
     pages = []
     kept = []
     try:
-        with open_browser(profile) as context:
-            print("Đã mở Gemini trực tiếp; không yêu cầu đăng nhập hoặc đổi model.")
-            print(f"Profile trình duyệt: {profile.resolve()}.")
+        with open_browser(profile, login_timeout) as context:
+            print("Đã kết nối Chrome/Edge sau bước đăng nhập Gemini.")
+            print(f"Phiên đăng nhập lưu trong {profile.resolve()}.")
             try:
                 for start in range(0, len(images), batch_size):
                     batch = images[start:start + batch_size]
@@ -393,19 +387,16 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                     else:
                         page = context.new_page()
                     pages.append(page)
-                    new_chat(page, browser_timeout)
+                    new_chat(page, login_timeout)
                     paths = [item.upload for item in batch]
                     choose_files(page, paths)
                     print(f"Chat {len(pages)}: đang chờ {len(batch)} ảnh tải xong hoàn toàn...", flush=True)
                     wait_for_upload(page, paths, upload_timeout)
                     print(f"Chat {len(pages)}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
                     if not attach_only:
-                        saved = send_prompt(page, prompt, paths, upload_timeout)
-                        if saved:
-                            print(f"Đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}")
-                        else:
-                            print("Đã gửi ảnh và nhận phản hồi trong chat khách. Giữ tab và ảnh gốc; không tải lại chat.")
-                        if saved and not keep_images:
+                        send_prompt(page, prompt, paths, upload_timeout)
+                        print(f"Đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}")
+                        if not keep_images:
                             kept.extend(delete_uploaded(batch))
                 if attach_only:
                     print("Ảnh đang đính kèm, chưa gửi. Giữ nguyên toàn bộ ảnh gốc.")

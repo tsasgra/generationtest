@@ -1,47 +1,58 @@
 # Tự tải ảnh trong img lên Gemini
 
 Đặt ảnh vào **`img/`** rồi chạy **`start_gemini.bat`**. Script tự nhận dạng ảnh
-theo nội dung file, mở chat mới và gửi ảnh. **Không bắt buộc đăng nhập hoặc đổi model.**
-Chat khách giữ nguyên ảnh gốc; chỉ chat đã lưu và xác nhận lại sau khi tải lại mới
-được xóa ảnh gốc nếu bạn không dùng `--keep-images`.
+theo nội dung file, mở chat mới, gửi ảnh và **xóa ảnh gốc đã xác nhận gửi thành công**.
 Script giữ các tab Gemini mở để bạn xem kết quả; đóng tab hoặc nhấn Ctrl+C khi xong.
 Nhánh này chỉ có luồng tải ảnh từ file trong `img/` lên Gemini và submit;
 không có thao tác copy thông tin hoặc đăng bài lên Polygon.
+**Bản chạy trong repository yêu cầu đăng nhập Google trước khi tải ảnh.**
+Chỉ script kiểm thử cục bộ trong `work/` được thử phiên khách; các script này
+không được đưa lên GitHub và không tạo tùy chọn bỏ qua đăng nhập cho bản chạy.
 
 ## Windows: lần chạy đầu
 
 1. Cài Python **3.10+** và Google Chrome hoặc Microsoft Edge bản cập nhật.
 2. Đặt ảnh vào `img`, cạnh `gemini_upload.py`, rồi bấm đúp `start_gemini.bat`.
    File chạy tự tạo `.venv-gemini` và cài thư viện cần thiết.
-3. Script mở thẳng Gemini, chờ ô chat và dùng phiên khách ngay; không mở trang đăng nhập Google.
+3. Đăng nhập Google trong cửa sổ Chrome/Edge được mở. Script chờ đăng nhập trước khi kết nối tự động.
 4. Khi ô chat sẵn sàng, script bấm **dấu + / Upload & tools → Upload files / Tải tệp lên**,
-   chọn ảnh, chờ tải xong rồi mới submit. Với giao diện khách có menu tài liệu/công cụ
-   bị khóa, script dùng ô chọn ảnh riêng đang bật của trang và bỏ qua lời mời đăng nhập.
-   Script xác nhận tin nhắn kèm ảnh và phản hồi Gemini.
+   chọn ảnh, chờ tải xong rồi mới submit, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
 5. Xem kết quả rồi đóng các tab Gemini do script mở hoặc nhấn Ctrl+C.
 
-Lần sau chỉ cần thêm ảnh vào `img` và chạy lại. Profile riêng nằm trong
-`.gemini-browser-native/chrome` hoặc `.gemini-browser-native/edge`. Nếu profile này
-đã đăng nhập từ trước, script dùng phiên sẵn có; không tự đăng nhập, đăng xuất hoặc đổi model.
+Lần sau chỉ cần thêm ảnh vào `img` và chạy lại. Phiên đăng nhập được giữ trong
+`.gemini-browser-native/chrome` hoặc `.gemini-browser-native/edge`, giống nhánh `copy_info_on_gemini`.
 Không chạy hai bản script cùng lúc hoặc chỉnh sửa/di chuyển ảnh khi đang chạy.
 
-## Mở thẳng Gemini
+## Trình duyệt từ copy_info_on_gemini
 
-Chỉ cần chạy **`start_gemini.bat`**, không cần nhập tài khoản hoặc chọn model.
-Script tìm Google Chrome đã cài, dùng Microsoft Edge nếu không tìm thấy Chrome,
-mở `https://gemini.google.com/app?hl=en` bằng profile riêng rồi kết nối Playwright
-qua cổng cục bộ `127.0.0.1`. Ô chat khách sẵn sàng là đủ để bắt đầu tải ảnh.
-Không tải Chromium đi kèm Playwright, đọc mật khẩu/cookie hoặc gọi API Gemini riêng.
+Phần mở trình duyệt được chuyển từ
+[`gemini_export.bat` của nhánh `copy_info_on_gemini`](https://github.com/tsasgra/generationtest/blob/e5ee49144ef20f7d5b02e8aa31b69f8056a0125c/gemini_export.bat).
+Chỉ cần chạy **`start_gemini.bat`**, không cần chọn Python hoặc trình duyệt bằng tham số.
 
-Dùng `start_gemini.bat --browser-info` để xem trình duyệt và profile sẽ dùng;
-lệnh này không cần ảnh và không mở trình duyệt. Đóng phiên khác dùng cùng profile
-trước khi chạy. Các tùy chọn cũ `--polygon-python`, `--login`, `--browser`,
-`--browser-path`, `--cdp-url` không được dùng.
+1. Tìm **Google Chrome đã cài trên máy**, dùng Microsoft Edge nếu không tìm thấy Chrome.
+2. Mở trực tiếp trình duyệt đó bằng `subprocess.Popen`, với profile riêng và cổng
+   kết nối chỉ ở `127.0.0.1`.
+3. Mở trang đăng nhập Google `accounts.google.com/ServiceLogin`, trỏ về Gemini.
+   Bạn tự nhập tài khoản trong giao diện Google; script chờ tab mới quay về Gemini.
+4. **Sau bước này** mới khởi động Playwright và kết nối qua CDP. Script tiếp tục chờ
+   ô chat và nút tài khoản Google để xác nhận đã đăng nhập, mở chat mới, tải và gửi ảnh.
+   Chỉ thấy ô chat của phiên khách hoặc quay về URL Gemini chưa đủ để bắt đầu tải ảnh.
 
-Script giữ các tab kết quả để bạn xem, sau đó chỉ đóng cửa sổ thuộc profile riêng.
-Với chat khách, không tải lại hoặc đóng tab trước khi xem xong vì cuộc trò chuyện
-có thể không được lưu. Nếu dịch vụ giữ ảnh ở trạng thái đang tải hoặc từ chối ảnh,
-script báo lỗi và giữ ảnh gốc; không tự chuyển sang đăng nhập hay bấm submit sớm.
+Cách này dùng Chrome/Edge của máy, không tải hoặc mở Chromium đi kèm Playwright.
+Không có bước giả mạo user-agent, tắt kiểm tra bảo mật hay đọc mật khẩu/cookie.
+Nếu Google vẫn chuyển đến trang “Couldn't sign you in”, script báo ngay và giữ ảnh.
+Chưa thể bảo đảm Google chấp nhận đăng nhập trên mọi máy/tài khoản.
+
+Dùng `start_gemini.bat --browser-info` để xem tên, đường dẫn và profile trình duyệt
+sẽ dùng; lệnh này không cần ảnh và không mở trình duyệt.
+Các tùy chọn cũ `--polygon-python`, `--login`, `--browser`, `--browser-path`,
+`--cdp-url` không còn dùng. Khi cập nhật từ bản trước, chạy lại BAT không kèm chúng.
+
+Nếu chuyển nhánh trong **cùng thư mục** đã chạy bản `copy_info_on_gemini`, profile
+`.gemini-browser-native` có thể được dùng lại. Nếu hai bản nằm ở hai thư mục khác
+nhau, mỗi bản giữ phiên riêng. Không chạy đồng thời hai công cụ dùng cùng profile.
+Script chỉ đóng cửa sổ của profile riêng sau khi bạn xem xong các tab kết quả;
+cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 
 ## Khi nào ảnh bị xóa?
 
@@ -52,16 +63,13 @@ nút Gửi đang bật. Các điều kiện phải ổn định ít nhất một
 sau khi điền nội dung gửi kèm; chỉ thấy tên file chưa đủ để submit. Nếu hết
 `--upload-timeout`, script báo lỗi và giữ ảnh, không cố bấm Gửi.
 
-Sau khi submit ở **phiên khách**, script đợi tin nhắn có đủ ảnh và phản hồi từ
-Gemini, **không tải lại chat và không xóa ảnh gốc**. Không cần chat có URL đã lưu.
-
-Nếu dùng phiên đã đăng nhập từ trước và chat có URL đã lưu, script **tải lại chat**,
-phải thấy lại tin nhắn cùng ảnh rồi mới xóa file tương ứng. Chỉ thấy ảnh trong ô
-soạn thảo chưa đủ điều kiện xóa.
+Sau khi submit, script đợi tin nhắn có đủ ảnh, **tải lại chat**,
+và phải thấy lại tin nhắn cùng ảnh trong chat đã lưu rồi mới xóa file tương ứng.
+Chỉ thấy ảnh trong ô soạn thảo chưa đủ điều kiện xóa.
 
 - Chỉ xóa file thuộc nhóm đã gửi và có nội dung/thông tin file khớp bản đã tải.
   File mới thêm vào `img`, file thay đổi trong lúc chạy và `.gitkeep` được giữ lại.
-- Lỗi tải ảnh, gửi tin nhắn hoặc không xác nhận được phản hồi/chat đã lưu:
+- Lỗi đăng nhập, tải ảnh, gửi tin nhắn hoặc không xác nhận được sau khi tải lại:
   giữ ảnh chưa xác nhận và trả lỗi. Không tự gửi lại; kiểm tra chat trước khi chạy lại
   nếu lần trước đã bấm Gửi, để tránh gửi trùng.
 - Nếu nhóm trước thành công nhưng nhóm sau lỗi, chỉ ảnh của nhóm trước đã bị xóa.
@@ -85,11 +93,9 @@ start_gemini.bat --attach-only
 `--prompt` thay nội dung gửi kèm. `--recursive` đọc cả các thư mục con trong `img`.
 
 Các tùy chọn khác: `--input THU_MUC`, `--batch-size 1` (1–10),
-`--upload-timeout 300`, `--browser-timeout 60`, `--max-file-mb 20`,
+`--upload-timeout 300`, `--login-timeout 600`, `--max-file-mb 20`,
 `--profile THU_MUC_RIENG`.
 `img` mặc định luôn nằm cạnh script, kể cả khi chạy từ thư mục khác.
-`--login-timeout` vẫn được nhận như tên cũ của `--browser-timeout`, chỉ là thời gian
-chờ ô chat sẵn sàng; không có bước bắt buộc đăng nhập.
 
 Script hỗ trợ ảnh mà Pillow đọc được như PNG, JPEG, WebP, BMP, GIF, TIFF, ICO, PSD;
 thêm HEIC/HEIF, AVIF, SVG và nhiều định dạng RAW qua các bộ giải mã đi kèm.
@@ -116,17 +122,17 @@ trước khi chạy. Không cần xóa profile cũ của bản trước để d�
 ## Git và kiểm thử
 
 GitHub chỉ chứa mã chạy, thư viện cần cài, file `.bat`, hướng dẫn và `img/.gitkeep`.
-Ảnh, profile trình duyệt, môi trường Python, file test/example đều được loại khỏi Git.
+Ảnh, profile đăng nhập, môi trường Python, file test/example đều được loại khỏi Git.
 Với `--input`/`--profile` tự đặt, dùng đường dẫn ngoài repo hoặc bổ sung vào `.gitignore`.
 
-Kiểm thử bằng Chromium trên trang mô phỏng bao gồm mở thẳng Gemini mà không
-đăng nhập, menu khách kèm ô chọn ảnh đang bật, tải chậm, ảnh hỏng, nút Gửi bị khóa,
-lỗi/hạn mức, submit và xác nhận phản hồi khách mà không tải lại/xóa ảnh gốc.
-Luồng chat đã lưu, chỉ đính kèm và việc giữ/xóa đúng ảnh gốc cũng được kiểm tra.
-File kiểm thử, log và ảnh mẫu chỉ giữ trong `work/`, không đưa lên GitHub.
+Kiểm thử bằng Chromium trên trang mô phỏng bao gồm menu thêm ảnh hiện tại,
+tải chậm, ảnh xem trước hỏng, nút Gửi bị khóa, lỗi/hạn mức, submit rồi tải lại chat,
+chế độ chỉ đính kèm và việc giữ/xóa đúng ảnh gốc. File kiểm thử và ảnh mẫu chỉ
+được giữ trong `work/`, không đưa lên GitHub.
 
-Đã thử ô chọn ảnh riêng trên Gemini thật ở phiên khách, không đăng nhập hoặc đổi
-model. Ảnh vào được vùng xem trước nhưng lần thử trong môi trường cloud vẫn chờ
-ở trạng thái đang tải; chưa xác nhận được submit thành công trên Gemini thật.
-Chưa chạy `.bat` trên Windows thật. Script không coi việc có ảnh xem trước là đã
-gửi thành công và giữ nguyên ảnh khi chưa xác nhận.
+Script test cục bộ đã truy cập Gemini thật ở phiên khách: ảnh vào vùng xem trước
+qua ô chọn ảnh riêng nhưng dừng ở 50% sau 180 giây; chưa xác nhận submit thành công.
+Kết quả test khách không thay đổi yêu cầu đăng nhập của mã được đẩy lên nhánh này.
+**Chưa xác minh gửi ảnh end-to-end trên tài khoản Gemini thật hoặc chạy `.bat`
+trên Windows thật**: môi trường phát triển chưa có phiên Google đăng nhập.
+Nếu giao diện thay đổi khiến không xác nhận được ảnh, script báo lỗi và giữ ảnh.

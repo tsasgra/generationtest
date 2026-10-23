@@ -23,16 +23,15 @@ def positive_number(value: str) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Tự nhận diện ảnh trong img và gửi lên Gemini, không bắt buộc đăng nhập.")
+    parser = argparse.ArgumentParser(description="Tự nhận diện ảnh trong img, gửi lên Gemini rồi xóa ảnh đã xác nhận.")
     parser.add_argument("--input", type=Path, default=ROOT / "img", help="Thư mục ảnh (mặc định: img cạnh script).")
     parser.add_argument("--recursive", action="store_true", help="Đọc cả các thư mục con.")
     parser.add_argument("--dry-run", action="store_true", help="Kiểm tra/chuyển ảnh offline, không mở Gemini.")
     parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-native",
-                        help="Thư mục profile Chrome/Edge riêng cho Gemini.")
+                        help="Thư mục profile Chrome/Edge riêng, giống copy_info_on_gemini.")
     parser.add_argument("--browser-info", action="store_true",
                         help="In tên và đường dẫn Chrome/Edge sẽ dùng rồi thoát; không cần ảnh.")
-    parser.add_argument("--browser-timeout", "--login-timeout", dest="browser_timeout", type=positive_number,
-                        default=60, help="Thời gian chờ ô chat sẵn sàng, giây; không bắt buộc đăng nhập.")
+    parser.add_argument("--login-timeout", type=positive_number, default=600, help="Thời gian chờ đăng nhập, giây.")
     parser.add_argument("--upload-timeout", type=positive_number, default=180, help="Thời gian chờ tải ảnh, giây.")
     parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10, help="Tối đa 10 ảnh mỗi chat mới.")
     parser.add_argument("--max-file-mb", type=positive_number, default=20, help="Giới hạn MiB mỗi PNG sau chuyển đổi.")
@@ -47,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
             name, executable = find_system_browser()
             print(f"Trình duyệt: {name.title()}\nĐường dẫn: {executable}")
             print(f"Profile: {(args.profile / name).resolve()}")
-            print("Mở thẳng Gemini ở phiên khách; không bắt buộc đăng nhập hoặc đổi model.")
+            print("Đăng nhập trực tiếp trước, kết nối Playwright sau khi quay về Gemini.")
             return 0
         files = collect_images(args.input.resolve(), args.recursive)
         # Validate every image before creating any chats. Temp files stay alive
@@ -62,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             upload_images(
                 images, profile=args.profile,
-                browser_timeout=args.browser_timeout, upload_timeout=args.upload_timeout,
+                login_timeout=args.login_timeout, upload_timeout=args.upload_timeout,
                 batch_size=args.batch_size, prompt=args.prompt,
                 keep_images=args.keep_images, attach_only=args.attach_only,
             )
@@ -74,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Thiếu thư viện ({exc.name}). Chạy: python -m pip install -r requirements-gemini.txt", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("\nĐã dừng. Ảnh chưa xác nhận được giữ lại; chat khách có thể chỉ còn trong tab hiện tại.", file=sys.stderr)
+        print("\nĐã dừng. Ảnh chưa xác nhận được giữ lại; các chat đã gửi vẫn tồn tại trên Gemini.", file=sys.stderr)
         return 130
 
 
