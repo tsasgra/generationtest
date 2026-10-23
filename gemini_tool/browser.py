@@ -15,13 +15,14 @@ GEMINI_URL = "https://gemini.google.com/app?hl=en"
 EDITOR = 'rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]'
 COMPOSER = 'input-container, .input-area-container, .input-container, form'
 UPLOAD_NAME = re.compile(
-    r"add files|add photos|upload files?|open upload file menu|"
+    r"add files|add photos|upload files?|upload\s*(?:&|and)\s*tools|open upload file menu|"
+    r"tải lên và công cụ|tải lên và các công cụ|"
     r"thêm (tệp|ảnh)|tải (tệp|ảnh) lên|mở trình đơn tải|^(?:add|thêm|\+)\s*$", re.I,
 )
 LOCAL_UPLOAD_NAME = re.compile(
     r"^\s*(?:upload files?|(?:upload )?from computer|tải (?:tệp|ảnh) lên|tải lên tệp|từ máy tính)\s*$", re.I,
 )
-PLUS_ICON = re.compile(r"^\s*(?:add|add_2|add_circle|add_circle_outline|attach_file|\+)\s*$")
+PLUS_ICON = re.compile(r"^\s*(?:add|add_2|add_circle|add_circle_outline|attach_file|plus|\+)\s*$")
 UPLOAD_MENU = '[role="menu"], .cdk-overlay-container, .mat-mdc-menu-panel, [data-test-id="upload-menu"]'
 SEND_NAME = re.compile(r"^(send|send message|submit|gửi|gửi tin nhắn)(\s.*)?$", re.I)
 
@@ -140,7 +141,8 @@ def _upload_button(composer):
     icons = composer.page.locator(
         'mat-icon, .material-icons, .material-symbols-outlined, .material-symbols-rounded, .google-symbols'
     ).filter(has_text=PLUS_ICON).or_(composer.page.locator(
-        'mat-icon[fonticon="add"], mat-icon[fonticon="add_2"], [data-mat-icon-name="add"]'
+        'mat-icon[fonticon="add"], mat-icon[fonticon="add_2"], mat-icon[fonticon="plus"], '
+        '[data-mat-icon-name="add"], [data-mat-icon-name="plus"]'
     ))
     return _first_ready(composer.get_by_role("button").filter(has=icons))
 
@@ -181,6 +183,13 @@ def choose_files(page, paths: list[Path], timeout: float = 15):
                     option.click()
                     selected_upload = True
                     continue
+                if opened_menu and _first_ready(page.locator(UPLOAD_MENU).get_by_text(re.compile(
+                    r"sign in to try tools|đăng nhập để (?:dùng thử|thử|sử dụng)", re.I,
+                ))) is not None:
+                    raise GeminiBrowserError(
+                        "Gemini yêu cầu đăng nhập Google để tải tệp. "
+                        "Hãy đăng nhập trong cửa sổ của script rồi chạy lại; chưa tải, gửi hoặc xóa ảnh."
+                    )
                 if not opened_menu:
                     composer = _composer(page)
                     if composer is not None:
@@ -211,31 +220,58 @@ def choose_files(page, paths: list[Path], timeout: float = 15):
 # accidentally be counted as confirmation of a new upload.
 ATTACHMENT_STATE = r"""({editorSelector, names}) => {
     const editor = document.querySelector(editorSelector);
-    if (!editor) return {count: 0, busy: true, error: ''};
+    if (!editor) return {count: 0, ready: false, busy: true, error: ''};
     const root = editor.closest('input-container, .input-area-container, .input-container, form');
-    if (!root) return {count: 0, busy: true, error: ''};
+    if (!root) return {count: 0, ready: false, busy: true, error: ''};
     const visible = el => !!(el.getClientRects().length) && getComputedStyle(el).visibility !== 'hidden';
     const query = selector => [...root.querySelectorAll(selector)].filter(visible);
-    const labels = query('[title], [aria-label], img[alt]').flatMap(el =>
+    const labels = query('[title], [aria-label], img[alt]').filter(el => !editor.contains(el)).flatMap(el =>
         ['title', 'aria-label', 'alt'].map(attr => el.getAttribute(attr) || ''));
-    const text = root.innerText || '';
-    const named = names.filter(name => labels.some(label => label.includes(name)) || text.includes(name)).length;
-    const previews = query('uploader-preview, .file-preview-container, .upload-preview, .attachment-preview');
+    const previews = query('uploader-preview, .file-preview-container, .upload-preview, .attachment-preview, .file-preview');
     const topPreviews = previews.filter(el => !previews.some(other => other !== el && other.contains(el)));
+    const named = names.filter(name => labels.some(label => label.includes(name)) ||
+        topPreviews.some(el => (el.innerText || '').includes(name))).length;
     const removers = query('button[aria-label]').filter(el =>
         /^(remove|delete|xóa|gỡ)\s.*(file|image|attachment|tệp|ảnh)/i.test(el.getAttribute('aria-label')));
+    const thumbnails = query('img').filter(el => !el.closest('button, .avatar, .profile-image') && !editor.contains(el));
+    const loaded = img => img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
+    // Some layouts use a CSS background for the thumbnail instead of <img>.
+    // Decode it as well; the filename/preview shell alone is never readiness.
+    const backgrounds = topPreviews.filter(el => !el.querySelector('img')).map(el => {
+        const background = [el, ...el.querySelectorAll('*')].filter(visible)
+            .map(node => getComputedStyle(node).backgroundImage).find(value => /^url\(/.test(value));
+        if (!background) return false;
+        const url = background.slice(4, -1).replace(/^["']|["']$/g, '');
+        const cache = window.__geminiUploaderBackgrounds ||= new WeakMap();
+        let cached = cache.get(el);
+        if (!cached || cached.url !== url) {
+            const image = new Image();
+            image.src = url;
+            cached = {url, image};
+            cache.set(el, cached);
+        }
+        return loaded(cached.image);
+    });
+    const loadingStatus = query('[role="status"], [aria-live]').filter(el =>
+        !editor.contains(el) && !el.contains(editor)).some(el =>
+        /uploading|loading|processing|đang tải|đang xử lý/i.test(el.innerText || ''));
+    const busySelector = '[role="progressbar"], mat-progress-spinner, mat-spinner, [aria-busy="true"], ' +
+        '.uploading, .loading, [data-upload-state="uploading"], [data-upload-state="pending"], ' +
+        '[data-state="uploading"], [data-state="loading"]';
     const errors = [...document.querySelectorAll('[role="alert"], .upload-error, .file-error')]
         .filter(visible).map(el => el.innerText).filter(value =>
         /error|failed|couldn.t|unable|limit|too many|too large|unsupported|lỗi|không thể|giới hạn|quá lớn/i.test(value));
     return {
         count: Math.max(named, topPreviews.length, removers.length),
-        busy: query('[role="progressbar"], mat-progress-spinner, [aria-busy="true"], .uploading').length > 0,
+        ready: thumbnails.length + backgrounds.length >= names.length &&
+            thumbnails.every(loaded) && backgrounds.every(Boolean),
+        busy: root.matches(busySelector) || query(busySelector).length > 0 || loadingStatus,
         error: errors.join('\n')
     };
 }"""
 
 
-def wait_for_upload(page, paths: list[Path], timeout: float):
+def wait_for_upload(page, paths: list[Path], timeout: float, *, require_send: bool = False):
     deadline = time.monotonic() + timeout
     stable_since = None
     while time.monotonic() < deadline:
@@ -244,16 +280,22 @@ def wait_for_upload(page, paths: list[Path], timeout: float):
         })
         if state["error"]:
             raise GeminiBrowserError(f"Gemini từ chối ảnh: {state['error']}")
-        if state["count"] == len(paths) and not state["busy"]:
+        button = None
+        if require_send:
+            composer = _composer(page)
+            if composer is not None:
+                button = _first_ready(composer.get_by_role("button", name=SEND_NAME))
+        if (state["count"] == len(paths) and state["ready"] and not state["busy"]
+                and (not require_send or button is not None)):
             if stable_since is None:
                 stable_since = time.monotonic()
             if time.monotonic() - stable_since >= 1:
-                return
+                return button
         else:
             stable_since = None
         page.wait_for_timeout(200)
     raise GeminiBrowserError(
-        "Chưa xác nhận đủ ảnh và trạng thái tải xong trong ô chat. "
+        "Chưa xác nhận đủ ảnh xem trước đã tải xong hoặc nút Gửi chưa sẵn sàng. "
         "Kiểm tra tab Gemini (hạn mức, lỗi tải hoặc giao diện thay đổi); không tự gửi lại."
     )
 
@@ -287,8 +329,9 @@ SAVED_MESSAGE = r"""({editorSelector, prompt, names}) => {
 def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
     editor = page.locator(EDITOR).first
     editor.fill(prompt)
-    button = page.get_by_role("button", name=SEND_NAME).first
-    button.wait_for(state="visible", timeout=timeout * 1000)
+    # Filling the prompt can update the composer. Recheck the attachments and
+    # enabled Send control together before clicking, even when called directly.
+    button = wait_for_upload(page, paths, timeout, require_send=True)
     button.click(timeout=timeout * 1000)
     try:
         arguments = {"editorSelector": EDITOR, "prompt": prompt, "names": [p.name for p in paths]}
@@ -325,7 +368,7 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
     kept = []
     try:
         with open_browser(profile, login_timeout) as context:
-            print("Đã kết nối Chrome/Edge sau bước đăng nhập như copy_info_on_gemini.")
+            print("Đã kết nối Chrome/Edge sau bước đăng nhập Gemini.")
             print(f"Phiên đăng nhập lưu trong {profile.resolve()}.")
             try:
                 for start in range(0, len(images), batch_size):
@@ -339,6 +382,7 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                     new_chat(page, login_timeout)
                     paths = [item.upload for item in batch]
                     choose_files(page, paths)
+                    print(f"Chat {len(pages)}: đang chờ {len(batch)} ảnh tải xong hoàn toàn...", flush=True)
                     wait_for_upload(page, paths, upload_timeout)
                     print(f"Chat {len(pages)}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
                     if not attach_only:

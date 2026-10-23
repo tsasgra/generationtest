@@ -3,6 +3,8 @@
 Đặt ảnh vào **`img/`** rồi chạy **`start_gemini.bat`**. Script tự nhận dạng ảnh
 theo nội dung file, mở chat mới, gửi ảnh và **xóa ảnh gốc đã xác nhận gửi thành công**.
 Script giữ các tab Gemini mở để bạn xem kết quả; đóng tab hoặc nhấn Ctrl+C khi xong.
+Nhánh này chỉ có luồng tải ảnh từ file trong `img/` lên Gemini và submit;
+không có thao tác copy thông tin hoặc đăng bài lên Polygon.
 
 ## Windows: lần chạy đầu
 
@@ -10,8 +12,8 @@ Script giữ các tab Gemini mở để bạn xem kết quả; đóng tab hoặc
 2. Đặt ảnh vào `img`, cạnh `gemini_upload.py`, rồi bấm đúp `start_gemini.bat`.
    File chạy tự tạo `.venv-gemini` và cài thư viện cần thiết.
 3. Đăng nhập Google trong cửa sổ Chrome/Edge được mở. Script chờ đăng nhập trước khi kết nối tự động.
-4. Khi ô chat sẵn sàng, script bấm **dấu + → Upload files / Tải tệp lên**, chọn ảnh,
-   gửi tin nhắn, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
+4. Khi ô chat sẵn sàng, script bấm **dấu + / Upload & tools → Upload files / Tải tệp lên**,
+   chọn ảnh, chờ tải xong rồi mới submit, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
 5. Xem kết quả rồi đóng các tab Gemini do script mở hoặc nhấn Ctrl+C.
 
 Lần sau chỉ cần thêm ảnh vào `img` và chạy lại. Phiên đăng nhập được giữ trong
@@ -51,7 +53,13 @@ cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 ## Khi nào ảnh bị xóa?
 
 Mỗi nhóm tối đa **10 ảnh** được gửi vào một chat mới, kèm nội dung mặc định
-`Ảnh được tải lên từ thư mục img.`. Script đợi tin nhắn có đủ ảnh, **tải lại chat**,
+`Ảnh được tải lên từ thư mục img.`. Trước khi bấm Gửi/submit, script phải thấy đủ
+ảnh xem trước đã tải được, không còn tiến trình/trạng thái đang tải hoặc xử lý và
+nút Gửi đang bật. Các điều kiện phải ổn định ít nhất một giây. Script kiểm tra lại
+sau khi điền nội dung gửi kèm; chỉ thấy tên file chưa đủ để submit. Nếu hết
+`--upload-timeout`, script báo lỗi và giữ ảnh, không cố bấm Gửi.
+
+Sau khi submit, script đợi tin nhắn có đủ ảnh, **tải lại chat**,
 và phải thấy lại tin nhắn cùng ảnh trong chat đã lưu rồi mới xóa file tương ứng.
 Chỉ thấy ảnh trong ô soạn thảo chưa đủ điều kiện xóa.
 
@@ -113,9 +121,13 @@ GitHub chỉ chứa mã chạy, thư viện cần cài, file `.bat`, hướng d�
 Ảnh, profile đăng nhập, môi trường Python, file test/example đều được loại khỏi Git.
 Với `--input`/`--profile` tự đặt, dùng đường dẫn ngoài repo hoặc bổ sung vào `.gitignore`.
 
-Các kiểm thử offline kiểm tra trình tự mở Chrome/Edge → đăng nhập → kết nối CDP,
-nhận diện trang Google từ chối đăng nhập, gửi/tải lại chat bằng trang mô phỏng,
-xóa đúng ảnh đã xác nhận và giữ ảnh lỗi/thay đổi. File kiểm thử không được đưa lên GitHub.
-**Chưa xác minh end-to-end trên Gemini thật hoặc chạy `.bat` trên Windows thật**:
-môi trường phát triển không cho truy cập Gemini. Nếu giao diện Gemini thay đổi
-khiến không xác nhận được ảnh, script báo lỗi và giữ nguyên các ảnh chưa xác nhận.
+Kiểm thử bằng Chromium trên trang mô phỏng bao gồm menu thêm ảnh hiện tại,
+tải chậm, ảnh xem trước hỏng, nút Gửi bị khóa, lỗi/hạn mức, submit rồi tải lại chat,
+chế độ chỉ đính kèm và việc giữ/xóa đúng ảnh gốc. File kiểm thử và ảnh mẫu chỉ
+được giữ trong `work/`, không đưa lên GitHub.
+
+Đã truy cập Gemini thật và đối chiếu nút **Upload & tools** cùng menu Upload files.
+**Chưa xác minh gửi ảnh end-to-end trên tài khoản Gemini thật hoặc chạy `.bat`
+trên Windows thật**: môi trường phát triển chưa có phiên Google đăng nhập;
+Gemini hiển thị “Sign in to try tools” và khóa chức năng tải tệp khi chưa đăng nhập.
+Nếu giao diện thay đổi khiến không xác nhận được ảnh, script báo lỗi và giữ ảnh.
