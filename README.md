@@ -1,12 +1,12 @@
-# Xử lý lần lượt 10 bài từ img1 đến img10 trên Gemini
+# Xử lý lần lượt 10 bài trong img trên Gemini
 
-Đặt ảnh bài 1 vào **`img1/`**, bài 2 vào **`img2/`**, ... bài 10 vào **`img10/`**,
-rồi chạy **`start_gemini.bat`** một lần. Các thư mục nằm cạnh script và được tạo lại
-nếu thiếu. Mỗi thư mục có thể chứa nhiều ảnh của cùng một bài, tối đa **10 ảnh**.
+Đặt ảnh bài 1 vào **`img/img1/`**, bài 2 vào **`img/img2/`**, ... bài 10 vào **`img/img10/`**,
+rồi chạy **`start_gemini.bat`** một lần. Thư mục **`img/`** nằm cạnh script;
+10 thư mục con `img1` đến `img10` được tạo lại nếu thiếu. Mỗi thư mục có thể chứa nhiều ảnh của cùng một bài, tối đa **10 ảnh**.
 Script xử lý theo đúng thứ tự số **1 → 10**, bỏ qua thư mục trống. Mỗi bài dùng
 một chat mới, gửi toàn bộ ảnh hợp lệ trong thư mục kèm đúng một dòng prompt
 `apply polygon-problem-setter skill`. Chỉ sau khi Gemini hoàn tất **10 Part**,
-xác nhận chat đã lưu, ghi đủ 10 file vào **`problem/imgN/`** và xử lý ảnh gốc,
+xác nhận chat đã lưu, ghi đủ 10 file vào **`problem/problemN/`** và xử lý ảnh gốc,
 script mới bắt đầu bài tiếp theo. Dùng chung một phiên trình duyệt cho cả lượt.
 Start tự dừng/dọn phiên cũ trước khi chạy. Sau khi xong tất cả bài hoặc gặp lỗi, script
 tự đóng trình duyệt và xóa trạng thái lần chạy; không cần mở Stop riêng.
@@ -16,16 +16,20 @@ cục bộ theo nhánh `copy_info_on_gemini`. Không đăng bài lên Polygon.
 Chỉ script kiểm thử cục bộ trong `work/` được thử phiên khách; các script này
 không được đưa lên GitHub và không tạo tùy chọn bỏ qua đăng nhập cho bản chạy.
 
+Khi cập nhật từ bản cũ, chuyển ảnh còn lại ở các thư mục `img1` … `img10` cạnh script
+vào các thư mục tương ứng bên trong `img/` trước khi chạy. Kết quả mới lưu theo tên
+`problem1` … `problem10`; các bộ kết quả cũ được giữ nguyên.
+
 ## Windows: lần chạy đầu
 
 1. Cài Python **3.10+** và Google Chrome hoặc Microsoft Edge bản cập nhật.
-2. Đặt ảnh từng bài vào `img1` đến `img10`, cạnh `gemini_upload.py`, rồi bấm đúp `start_gemini.bat`.
+2. Đặt ảnh từng bài vào `img/img1` đến `img/img10` bên trong thư mục `img`, cạnh `gemini_upload.py`, rồi bấm đúp `start_gemini.bat`.
    File chạy tự tạo `.venv-gemini` và cài thư viện cần thiết.
 3. Đăng nhập Google trong cửa sổ Chrome/Edge được mở. Script chờ đăng nhập trước khi kết nối tự động.
 4. Khi ô chat sẵn sàng, script bấm **dấu + / Upload & tools → Upload files / Tải tệp lên**,
    chọn ảnh, chờ tải xong rồi mới submit. Script chờ Gemini hoàn tất đủ 10 Part,
-   xác nhận chat đã lưu, ghi 10 file vào `problem/imgN` rồi mới xóa ảnh đã xác nhận.
-5. Xong bài hiện tại mới chuyển sang thư mục có ảnh tiếp theo; sau `img10` thì dừng,
+   xác nhận chat đã lưu, ghi 10 file vào `problem/problemN` rồi mới xóa ảnh đã xác nhận.
+5. Xong bài hiện tại mới chuyển sang thư mục có ảnh tiếp theo; sau `img/img10` thì dừng,
    tự đóng trình duyệt và dọn checkpoint.
    Nếu hết thời gian chờ hoặc có lỗi, script báo lỗi và vẫn dọn dữ liệu chạy tạm.
    Xem lại kết quả trong lịch sử Gemini; thêm ảnh rồi chạy lại Start khi cần.
@@ -41,7 +45,7 @@ như `/u/0/app`. Nếu Gemini khôi phục chat cũ, script bấm **New chat** r
 trống trước khi thêm ảnh. Nội dung lịch sử ẩn và ký tự trắng của trình soạn thảo
 không bị tính nhầm thành một cuộc trò chuyện đang có nội dung.
 
-Lần sau chỉ cần thêm ảnh vào `img1` đến `img10` và chạy lại. Phiên đăng nhập được giữ trong
+Lần sau chỉ cần thêm ảnh vào `img/img1` đến `img/img10` và chạy lại. Phiên đăng nhập được giữ trong
 `.gemini-browser-native/chrome` hoặc `.gemini-browser-native/edge`, giống nhánh `copy_info_on_gemini`.
 Không chỉnh sửa/di chuyển ảnh khi đang chạy. Trên Windows, mở Start lần nữa sẽ
 dừng phiên cũ, dọn dữ liệu cũ rồi mới chạy phiên mới.
@@ -54,7 +58,7 @@ không còn file `stop.bat` riêng trong repository.
 1. Trước khi chạy trên Windows, Start dừng phiên uploader/trình duyệt cũ và dọn
    dữ liệu còn sót, kể cả khi lần trước bị lỗi hoặc bị tắt cưỡng bức.
 2. Với từng bài, tải toàn bộ ảnh, chờ ảnh tải xong hoàn toàn, gửi đúng prompt,
-   chờ đủ 10 Part và lưu bộ file `problem/imgN` sau khi xác nhận chat đã lưu.
+   chờ đủ 10 Part và lưu bộ file `problem/problemN` sau khi xác nhận chat đã lưu.
 3. Khi xong hàng đợi, lỗi, hết thời gian, hủy bằng Ctrl+C hoặc cài thư viện thất bại,
    bộ khởi động luôn chạy bước dọn trong `finally`. Luồng gửi bình thường không
    giữ tab mở chờ bạn đóng nữa.
@@ -122,7 +126,7 @@ cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 
 ## Khi nào ảnh bị xóa?
 
-Mỗi thư mục `img1` đến `img10` là **một bài**, tối đa **10 ảnh**, được gửi vào một chat mới, kèm nội dung mặc định
+Mỗi thư mục `img/img1` đến `img/img10` là **một bài**, tối đa **10 ảnh**, được gửi vào một chat mới, kèm nội dung mặc định
 `apply polygon-problem-setter skill`, chỉ đúng một dòng này, không thêm nội dung khác.
 Không trộn ảnh giữa hai thư mục hoặc tự tách một bài thành nhiều chat. Nếu một
 thư mục có hơn 10 ảnh hợp lệ, script báo lỗi trước khi mở trình duyệt, giữ nguyên ảnh.
@@ -176,17 +180,17 @@ Mỗi Part phải có đúng một khối code; Part 6 (note) được phép đ�
 | 9 | `script_sinh_test.txt` |
 | 10 | `solution.txt` |
 
-Kết quả giữ đúng số thư mục đầu vào: `img1` → `problem/img1/`, ...,
-`img10` → `problem/img10/`. Mỗi thư mục kết quả chứa đủ 10 file trên. Thư mục ảnh
-trống không tạo hoặc xóa kết quả cũ; chỉ có ảnh trong `img2` và `img10` thì chỉ xử lý
-hai bài đó theo thứ tự 2 rồi 10. Bộ cũ chỉ được thay khi đã chuẩn bị đủ 10 file mới;
+Mỗi bài luôn lưu đủ 10 Part trong thư mục `problem`. Kết quả giữ đúng số thư mục đầu vào: `img/img1` → `problem/problem1/`, ...,
+`img/img10` → `problem/problem10/`. Mỗi thư mục kết quả chứa đủ 10 file trên. Thư mục ảnh
+trống không tạo hoặc xóa kết quả cũ; chỉ có ảnh trong `img/img2` và `img/img10` thì chỉ xử lý
+hai bài đó theo thứ tự 2 rồi 10, lưu vào `problem/problem2` và `problem/problem10`. Bộ cũ chỉ được thay khi đã chuẩn bị đủ 10 file mới;
 không ghi dở dang hoặc xóa file lạ trong thư mục đầu ra.
 
-Để dùng một thư mục riêng theo cách cũ, chạy `start_gemini.bat --input img`.
+Để dùng một thư mục riêng theo cách cũ, chạy `start_gemini.bat --input THU_MUC_ANH_RIENG`.
 Chế độ `--input` chia nhóm theo `--batch-size`: một chat lưu trực tiếp trong
 `problem/`, nhiều chat lưu riêng trong `problem/chat_0001/`, `problem/chat_0002/`, ...
 Khi đã có các thư mục `chat_000N`, những lần sau vẫn dùng cách bố trí đó.
-Nếu `problem/` đã chứa các kết quả `imgN`, hãy dùng hàng đợi mặc định để tiếp tục
+Nếu `problem/` đã chứa các kết quả `problemN`, hãy dùng hàng đợi mặc định để tiếp tục
 lưu theo bài; chế độ cũ sẽ báo lỗi nếu phải thay thư mục có kết quả lạ.
 
 Mặc định chờ Gemini tối đa **600 giây mỗi chat**. Có thể tăng thời gian:
@@ -215,7 +219,8 @@ start_gemini.bat --attach-only
 Các tùy chọn khác: `--input THU_MUC` (thay hàng đợi mặc định), `--batch-size 1` (1–10, chỉ với `--input`),
 `--upload-timeout 300`, `--response-timeout 1800`, `--login-timeout 600`, `--max-file-mb 20`,
 `--profile THU_MUC_RIENG`.
-`img1` đến `img10` mặc định luôn nằm cạnh script, kể cả khi chạy từ thư mục khác.
+Thư mục `img` mặc định luôn nằm cạnh script; `img1` đến `img10` nằm bên trong `img`,
+kể cả khi chạy từ thư mục khác.
 
 Script hỗ trợ ảnh mà Pillow đọc được như PNG, JPEG, WebP, BMP, GIF, TIFF, ICO, PSD;
 thêm HEIC/HEIF, AVIF, SVG và nhiều định dạng RAW qua các bộ giải mã đi kèm.
@@ -272,7 +277,7 @@ trên Windows thật**: môi trường phát triển chưa có phiên Google đ�
 thiếu/trùng Part, phản hồi cũ/ẩn, ghi file lỗi và hủy trong lúc chờ. Kiểm tra luồng
 hoàn chỉnh xác nhận không reload, ghi file, xóa ảnh hoặc đóng phiên trước khi đủ
 10 phần; bộ `problem` hoàn thành vẫn được giữ sau khi dọn trạng thái.
-Kiểm thử hàng đợi đã chạy đủ `img1` đến `img10`, nhiều ảnh mỗi bài, xác nhận
+Kiểm thử hàng đợi đã chạy đủ `img/img1` đến `img/img10`, nhiều ảnh mỗi bài, xác nhận
 không mở bài tiếp theo trước khi lưu/xử lý xong bài hiện tại. Đã kiểm tra bỏ qua
 thư mục trống, thứ tự số, giới hạn ảnh, lỗi/Stop giữa hàng đợi và chạy lại sau lỗi
 mà vẫn giữ kết quả bài đã hoàn tất, đăng nhập và thư viện.

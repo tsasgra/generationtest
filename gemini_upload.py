@@ -26,7 +26,11 @@ def positive_number(value: str) -> float:
 
 
 def numbered_folders(root: Path) -> list[Path]:
-    folders = [root / f"img{number}" for number in range(1, 11)]
+    parent = root / "img"
+    parent.mkdir(exist_ok=True)
+    if not ordinary_directory(parent):
+        raise ImageInputError(f"Thư mục ảnh phải là thư mục thật, không phải liên kết: {parent}")
+    folders = [parent / f"img{number}" for number in range(1, 11)]
     for folder in folders:
         check_stop()
         folder.mkdir(exist_ok=True)
@@ -36,8 +40,8 @@ def numbered_folders(root: Path) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Xử lý lần lượt các bài trong img1 đến img10, mỗi bài một chat Gemini và bộ 10 Part riêng.")
-    parser.add_argument("--input", type=Path, help="Dùng một thư mục ảnh riêng thay cho hàng đợi mặc định img1–img10.")
+    parser = argparse.ArgumentParser(description="Xử lý lần lượt img/img1 đến img/img10, lưu 10 Part mỗi bài vào problem/problem1 đến problem/problem10.")
+    parser.add_argument("--input", type=Path, help="Dùng một thư mục ảnh riêng thay cho hàng đợi mặc định img/img1–img/img10.")
     parser.add_argument("--recursive", action="store_true", help="Đọc cả các thư mục con.")
     parser.add_argument("--dry-run", action="store_true", help="Kiểm tra/chuyển ảnh offline, không mở Gemini.")
     parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-native",
@@ -49,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--response-timeout", type=positive_number, default=600,
                         help="Thời gian chờ Gemini hoàn tất đủ 10 Part để lưu vào problem, giây.")
     parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10,
-                        help="Chỉ dùng với --input: số ảnh mỗi chat (1–10). img1–img10 luôn gửi cả thư mục trong một chat.")
+                        help="Chỉ dùng với --input: số ảnh mỗi chat (1–10). img/img1–img/img10 luôn gửi cả thư mục trong một chat.")
     parser.add_argument("--max-file-mb", type=positive_number, default=20, help="Giới hạn MiB mỗi PNG sau chuyển đổi.")
     parser.add_argument("--prompt", default="apply polygon-problem-setter skill", help="Nội dung gửi kèm ảnh trong mỗi chat.")
     parser.add_argument("--keep-images", action="store_true", help="Giữ ảnh gốc sau khi gửi thành công.")
@@ -84,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{len(images)} ảnh; {(len(images) + args.batch_size - 1) // args.batch_size} chat mới.")
                 else:
                     tasks = []
-                    for folder in numbered_folders(ROOT):
+                    for number, folder in enumerate(numbered_folders(ROOT), 1):
                         files = collect_images(folder, args.recursive, allow_empty=True)
                         if not files:
                             print(f"{folder.name}: thư mục trống, bỏ qua.")
@@ -97,12 +101,12 @@ def main(argv: list[str] | None = None) -> int:
                                 "Giảm còn tối đa 10 ảnh; không tự tách một bài thành nhiều chat."
                             )
                         for item in images:
-                            print(f"{folder.name}/{item.source.name} → {item.upload.name}: {item.note}")
-                        tasks.append(UploadTask(images, RUNTIME.parent / "problem" / folder.name, folder.name))
+                            print(f"img/{folder.name}/{item.source.name} → {item.upload.name}: {item.note}")
+                        tasks.append(UploadTask(images, RUNTIME.parent / "problem" / f"problem{number}", folder.name))
                     if not tasks:
-                        print("Chưa có ảnh. Đặt ảnh từng bài vào img1 đến img10 rồi chạy lại Start.")
+                        print("Chưa có ảnh. Đặt ảnh từng bài vào img/img1 đến img/img10 rồi chạy lại Start.")
                         return 0
-                    print(f"Đã chuẩn bị {sum(len(task.images) for task in tasks)} ảnh cho {len(tasks)} bài; xử lý theo thứ tự img1 → img10.")
+                    print(f"Đã chuẩn bị {sum(len(task.images) for task in tasks)} ảnh cho {len(tasks)} bài; xử lý theo thứ tự img/img1 → img/img10.")
                 if args.dry_run:
                     print("Kiểm tra offline thành công. Chưa mở Gemini hoặc tải ảnh lên mạng.")
                     return 0
