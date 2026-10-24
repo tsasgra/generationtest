@@ -117,7 +117,7 @@ cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 ## Khi nào ảnh bị xóa?
 
 Mỗi nhóm tối đa **10 ảnh** được gửi vào một chat mới, kèm nội dung mặc định
-`apply polygon setter skill`, chỉ đúng một dòng này, không thêm nội dung khác.
+`apply polygon-problem-setter skill`, chỉ đúng một dòng này, không thêm nội dung khác.
 Trước khi bấm Gửi/submit, script phải thấy đủ
 ảnh xem trước đã tải được, không còn tiến trình/trạng thái đang tải hoặc xử lý và
 nút Gửi đang bật. Cả trạng thái tải trong ô soạn thảo lẫn thanh tiến trình/thông báo
@@ -186,7 +186,7 @@ Các bộ `problem` hoàn thành được giữ qua Start/Stop và được lo�
 
 ```bat
 start_gemini.bat --dry-run
-start_gemini.bat --prompt "apply polygon setter skill"
+start_gemini.bat --prompt "apply polygon-problem-setter skill"
 start_gemini.bat --keep-images
 start_gemini.bat --attach-only
 ```

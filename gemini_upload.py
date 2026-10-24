@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Thời gian chờ Gemini hoàn tất đủ 10 Part để lưu vào problem, giây.")
     parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10, help="Tối đa 10 ảnh mỗi chat mới.")
     parser.add_argument("--max-file-mb", type=positive_number, default=20, help="Giới hạn MiB mỗi PNG sau chuyển đổi.")
-    parser.add_argument("--prompt", default="apply polygon setter skill", help="Nội dung gửi kèm ảnh trong mỗi chat.")
+    parser.add_argument("--prompt", default="apply polygon-problem-setter skill", help="Nội dung gửi kèm ảnh trong mỗi chat.")
     parser.add_argument("--keep-images", action="store_true", help="Giữ ảnh gốc sau khi gửi thành công.")
     parser.add_argument("--attach-only", action="store_true", help="Chỉ đính kèm, không gửi và không xóa ảnh.")
     args = parser.parse_args(argv)
