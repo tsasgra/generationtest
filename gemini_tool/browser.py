@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 import re
 import sys
@@ -35,6 +36,13 @@ ACTION_DELAY = 0.8
 
 class GeminiBrowserError(RuntimeError):
     """Browser/UI did not confirm the requested operation."""
+
+
+@dataclass(frozen=True)
+class UploadTask:
+    images: list[PreparedImage]
+    output: Path
+    label: str
 
 
 def pause_after_action(page):
@@ -469,24 +477,40 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                   batch_size: int, prompt: str, keep_images: bool = False,
                   attach_only: bool = False, output: Path | None = None,
                   response_timeout: float = 600):
-    from playwright.sync_api import Error as PlaywrightError
-
-    pages = []
-    kept = []
     output = output or Path(__file__).resolve().parent.parent / "problem"
     count = (len(images) + batch_size - 1) // batch_size
     destinations = output_destinations(output, count)
-    if not attach_only:
-        for destination in destinations:
-            validate_output(destination)
+    tasks = [UploadTask(images[start:start + batch_size], destinations[index], f"Chat {index + 1}")
+             for index, start in enumerate(range(0, len(images), batch_size))]
+    upload_tasks(tasks, profile=profile, login_timeout=login_timeout, upload_timeout=upload_timeout,
+                 prompt=prompt, keep_images=keep_images, attach_only=attach_only,
+                 response_timeout=response_timeout)
+
+
+def upload_tasks(tasks: list[UploadTask], *, profile: Path,
+                 login_timeout: float, upload_timeout: float,
+                 prompt: str, keep_images: bool = False, attach_only: bool = False,
+                 response_timeout: float = 600):
+    """Finish one whole problem, including export, before opening the next chat."""
+    from playwright.sync_api import Error as PlaywrightError
+
+    if not tasks:
+        return
+    for task in tasks:
+        if not 1 <= len(task.images) <= 10:
+            raise GeminiBrowserError(f"{task.label}: mỗi bài cần từ 1 đến 10 ảnh trong cùng một chat.")
+        if not attach_only:
+            validate_output(task.output)
+    pages = []
     try:
         with open_browser(profile, login_timeout) as context:
             print("Đã kết nối Chrome/Edge sau bước đăng nhập Gemini.")
             print(f"Phiên đăng nhập lưu trong {profile.resolve()}.")
             try:
-                for start in range(0, len(images), batch_size):
+                for index, task in enumerate(tasks, 1):
                     check_stop()
-                    batch = images[start:start + batch_size]
+                    batch = task.images
+                    print(f"[{index}/{len(tasks)}] Bắt đầu {task.label}: {len(batch)} ảnh.", flush=True)
                     # Reuse the launcher's empty tab, preserving any restored chats.
                     if not pages and context.pages and context.pages[0].url == "about:blank":
                         page = context.pages[0]
@@ -497,31 +521,31 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                     pause_after_action(page)
                     paths = [item.upload for item in batch]
                     choose_files(page, paths)
-                    print(f"Chat {len(pages)}: đang chờ {len(batch)} ảnh tải xong hoàn toàn...", flush=True)
+                    print(f"{task.label}: đang chờ {len(batch)} ảnh tải xong hoàn toàn...", flush=True)
                     wait_for_upload(page, paths, upload_timeout)
-                    print(f"Chat {len(pages)}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
+                    print(f"{task.label}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
                     if not attach_only:
                         send_prompt(page, prompt, paths, upload_timeout)
-                        print(f"Chat {len(pages)}: đã gửi ảnh; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
+                        print(f"{task.label}: đã gửi ảnh; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
                         parts = wait_for_parts(page, prompt, response_timeout)
                         verify_saved_upload(page, prompt, paths, upload_timeout)
                         check_stop()
-                        destination = destinations[len(pages) - 1]
+                        destination = task.output
                         write_parts(parts, destination)
                         print(f"Đã lưu đủ 10 file .txt tại: {destination.resolve()}", flush=True)
                         print(f"Đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}")
                         if not keep_images:
-                            kept.extend(delete_uploaded(batch))
-                if attach_only:
-                    print("Ảnh đang đính kèm, chưa gửi. Giữ nguyên toàn bộ ảnh gốc.")
+                            retained = delete_uploaded(batch)
+                            if retained:
+                                raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
+                        print(f"Đã hoàn tất {task.label}.", flush=True)
+                    else:
+                        print("Ảnh đang đính kèm, chưa gửi. Giữ nguyên toàn bộ ảnh gốc; đóng tab này để tiếp tục bài kế tiếp.")
+                        keep_tabs_open([page])
             except Exception:
                 print("Đã dừng lần chạy lỗi; giữ ảnh chưa xác nhận và đóng phiên trình duyệt này.", file=sys.stderr)
                 raise
-            if kept:
-                raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
-            if attach_only:
-                keep_tabs_open(pages)
-            else:
+            if not attach_only:
                 print("Đã lưu đủ 10 Part cho từng chat. Đang đóng trình duyệt và dọn trạng thái lần chạy...", flush=True)
     except PlaywrightError as exc:
         check_stop()

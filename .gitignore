@@ -12,6 +12,10 @@ examples/
 .gemini-browser*/
 img/*
 !img/.gitkeep
+/img[1-9]/*
+!/img[1-9]/.gitkeep
+/img10/*
+!/img10/.gitkeep
 /.gemini-stop-request
 /.gemini-*.lock
 /.gemini-runtime/

@@ -35,7 +35,7 @@ class PreparedImage:
     complete: bool = True
 
 
-def collect_images(folder: Path, recursive: bool = False) -> list[Path]:
+def collect_images(folder: Path, recursive: bool = False, *, allow_empty: bool = False) -> list[Path]:
     if not folder.is_dir():
         raise ImageInputError(f"Không tìm thấy thư mục ảnh: {folder}")
     paths = folder.rglob("*") if recursive else folder.iterdir()
@@ -46,7 +46,7 @@ def collect_images(folder: Path, recursive: bool = False) -> list[Path]:
          and p.name.casefold() not in {"thumbs.db", "desktop.ini"}),
         key=lambda p: p.relative_to(folder).as_posix().casefold(),
     )
-    if not files:
+    if not files and not allow_empty:
         raise ImageInputError(f"Thư mục chưa có ảnh. Hãy đặt ảnh vào: {folder}")
     return files
 

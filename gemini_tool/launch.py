@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
         return stop_main(arguments[1:])
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-native")
-    parser.add_argument("--input", type=Path, default=ROOT / "img")
+    parser.add_argument("--input", type=Path)
     selected, _ = parser.parse_known_args(arguments)
     diagnostic = any(value in arguments for value in ("--browser-info", "--help", "-h"))
 
@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         for path in (selected.profile, selected.input):
-            if path.resolve().is_relative_to((ROOT / ".gemini-runtime").resolve()):
+            if path is not None and path.resolve().is_relative_to((ROOT / ".gemini-runtime").resolve()):
                 raise ValueError("Không đặt ảnh gốc hoặc profile đăng nhập trong .gemini-runtime (thư mục tạm).")
         with start_run(
             before_start=None if diagnostic else lambda: reset("Đang dừng và dọn phiên cũ trước khi chạy..."),

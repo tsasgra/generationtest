@@ -8,11 +8,11 @@ from pathlib import Path
 import sys
 import tempfile
 
-from gemini_tool.browser import GeminiBrowserError, upload_images
+from gemini_tool.browser import GeminiBrowserError, UploadTask, upload_images, upload_tasks
 from gemini_tool.control import RUNTIME, StopRequested, check_stop, upload_run
 from gemini_tool.images import ImageInputError, collect_images, prepare_images
 from gemini_tool.native import find_system_browser
-from gemini_tool.state import remember_profile
+from gemini_tool.state import ordinary_directory, remember_profile
 from gemini_tool.stop import reset_run
 
 ROOT = Path(__file__).resolve().parent
@@ -25,9 +25,19 @@ def positive_number(value: str) -> float:
     return number
 
 
+def numbered_folders(root: Path) -> list[Path]:
+    folders = [root / f"img{number}" for number in range(1, 11)]
+    for folder in folders:
+        check_stop()
+        folder.mkdir(exist_ok=True)
+        if not ordinary_directory(folder):
+            raise ImageInputError(f"Thư mục ảnh phải là thư mục thật, không phải liên kết: {folder}")
+    return folders
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Tự nhận diện ảnh trong img, gửi lên Gemini rồi xóa ảnh đã xác nhận.")
-    parser.add_argument("--input", type=Path, default=ROOT / "img", help="Thư mục ảnh (mặc định: img cạnh script).")
+    parser = argparse.ArgumentParser(description="Xử lý lần lượt các bài trong img1 đến img10, mỗi bài một chat Gemini và bộ 10 Part riêng.")
+    parser.add_argument("--input", type=Path, help="Dùng một thư mục ảnh riêng thay cho hàng đợi mặc định img1–img10.")
     parser.add_argument("--recursive", action="store_true", help="Đọc cả các thư mục con.")
     parser.add_argument("--dry-run", action="store_true", help="Kiểm tra/chuyển ảnh offline, không mở Gemini.")
     parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-native",
@@ -38,7 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--upload-timeout", type=positive_number, default=180, help="Thời gian chờ tải ảnh, giây.")
     parser.add_argument("--response-timeout", type=positive_number, default=600,
                         help="Thời gian chờ Gemini hoàn tất đủ 10 Part để lưu vào problem, giây.")
-    parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10, help="Tối đa 10 ảnh mỗi chat mới.")
+    parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10,
+                        help="Chỉ dùng với --input: số ảnh mỗi chat (1–10). img1–img10 luôn gửi cả thư mục trong một chat.")
     parser.add_argument("--max-file-mb", type=positive_number, default=20, help="Giới hạn MiB mỗi PNG sau chuyển đổi.")
     parser.add_argument("--prompt", default="apply polygon-problem-setter skill", help="Nội dung gửi kèm ảnh trong mỗi chat.")
     parser.add_argument("--keep-images", action="store_true", help="Giữ ảnh gốc sau khi gửi thành công.")
@@ -54,32 +65,57 @@ def main(argv: list[str] | None = None) -> int:
             print("Đăng nhập trực tiếp trước, kết nối Playwright sau khi quay về Gemini.")
             return 0
         for selected in (args.profile, args.input):
-            if selected.resolve().is_relative_to(RUNTIME.resolve()):
+            if selected is not None and selected.resolve().is_relative_to(RUNTIME.resolve()):
                 raise ValueError("Không đặt ảnh gốc hoặc profile đăng nhập trong .gemini-runtime (thư mục tạm).")
         def cleanup():
             reset_run(RUNTIME.parent, [args.profile], stop_processes=False)
             print("Đã dọn toàn bộ checkpoint, tab, bản nháp, cache và ảnh tạm; giữ thư viện đã cài và đăng nhập Google.", flush=True)
 
         with upload_run(cleanup=cleanup):
-            files = collect_images(args.input.resolve(), args.recursive)
             remember_profile(RUNTIME, args.profile)
             # A forced Windows Stop bypasses Python's finally blocks. Keep all
             # prepared files in a known owned directory that Stop can remove.
             with tempfile.TemporaryDirectory(prefix="upload-", dir=RUNTIME) as directory:
-                images = prepare_images(files, Path(directory), args.max_file_mb, skip_invalid=True)
-                for item in images:
-                    print(f"{item.source.name} → {item.upload.name}: {item.note}")
-                print(f"{len(images)} ảnh; {(len(images) + args.batch_size - 1) // args.batch_size} chat mới.")
+                if args.input is not None:
+                    files = collect_images(args.input.resolve(), args.recursive)
+                    images = prepare_images(files, Path(directory), args.max_file_mb, skip_invalid=True)
+                    for item in images:
+                        print(f"{item.source.name} → {item.upload.name}: {item.note}")
+                    print(f"{len(images)} ảnh; {(len(images) + args.batch_size - 1) // args.batch_size} chat mới.")
+                else:
+                    tasks = []
+                    for folder in numbered_folders(ROOT):
+                        files = collect_images(folder, args.recursive, allow_empty=True)
+                        if not files:
+                            print(f"{folder.name}: thư mục trống, bỏ qua.")
+                            continue
+                        images = prepare_images(files, Path(directory) / folder.name,
+                                                args.max_file_mb, skip_invalid=True)
+                        if len(images) > 10:
+                            raise ImageInputError(
+                                f"{folder.name} có {len(images)} ảnh hợp lệ, vượt giới hạn 10 ảnh/chat. "
+                                "Giảm còn tối đa 10 ảnh; không tự tách một bài thành nhiều chat."
+                            )
+                        for item in images:
+                            print(f"{folder.name}/{item.source.name} → {item.upload.name}: {item.note}")
+                        tasks.append(UploadTask(images, RUNTIME.parent / "problem" / folder.name, folder.name))
+                    if not tasks:
+                        print("Chưa có ảnh. Đặt ảnh từng bài vào img1 đến img10 rồi chạy lại Start.")
+                        return 0
+                    print(f"Đã chuẩn bị {sum(len(task.images) for task in tasks)} ảnh cho {len(tasks)} bài; xử lý theo thứ tự img1 → img10.")
                 if args.dry_run:
                     print("Kiểm tra offline thành công. Chưa mở Gemini hoặc tải ảnh lên mạng.")
                     return 0
-                upload_images(
-                    images, profile=args.profile,
+                options = dict(profile=args.profile,
                     login_timeout=args.login_timeout, upload_timeout=args.upload_timeout,
-                    batch_size=args.batch_size, prompt=args.prompt,
+                    prompt=args.prompt,
                     keep_images=args.keep_images, attach_only=args.attach_only,
-                    output=RUNTIME.parent / "problem", response_timeout=args.response_timeout,
+                    response_timeout=args.response_timeout,
                 )
+                if args.input is not None:
+                    upload_images(images, batch_size=args.batch_size, output=RUNTIME.parent / "problem", **options)
+                else:
+                    upload_tasks(tasks, **options)
         return 0
     except (ImageInputError, GeminiBrowserError, ValueError, OSError) as exc:
         print(f"Lỗi: {exc}", file=sys.stderr)

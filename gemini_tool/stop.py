@@ -312,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"Đã hoàn tất Stop; không còn tiến trình của công cụ (dừng cưỡng bức {stopped} tiến trình gốc).")
     print(f"Đã dọn {removed} mục dữ liệu chạy: checkpoint, tab khôi phục, bản nháp, cache và ảnh tạm.")
-    print("Giữ nguyên .venv-gemini, ảnh trong img và phiên đăng nhập Google. Bấm start_gemini.bat để chạy lại.")
+    print("Giữ nguyên .venv-gemini, ảnh gốc trong các thư mục và phiên đăng nhập Google. Bấm start_gemini.bat để chạy lại.")
     print("Tin nhắn Gemini đã nhận vẫn tồn tại; Stop không thu hồi ảnh đã gửi.")
     return 0
 
