@@ -2,7 +2,8 @@
 
 Đặt ảnh vào **`img/`** rồi chạy **`start_gemini.bat`**. Script tự nhận dạng ảnh
 theo nội dung file, mở chat mới, gửi ảnh và **xóa ảnh gốc đã xác nhận gửi thành công**.
-Script giữ các tab Gemini mở để bạn xem kết quả; đóng tab hoặc nhấn Ctrl+C khi xong.
+Start tự dừng/dọn phiên cũ trước khi chạy. Sau khi gửi xong hoặc gặp lỗi, script
+tự đóng trình duyệt và xóa trạng thái lần chạy; không cần mở Stop riêng.
 Nhánh này chỉ có luồng tải ảnh từ file trong `img/` lên Gemini và submit;
 không có thao tác copy thông tin hoặc đăng bài lên Polygon.
 **Bản chạy trong repository yêu cầu đăng nhập Google trước khi tải ảnh.**
@@ -17,7 +18,8 @@ không được đưa lên GitHub và không tạo tùy chọn bỏ qua đăng n
 3. Đăng nhập Google trong cửa sổ Chrome/Edge được mở. Script chờ đăng nhập trước khi kết nối tự động.
 4. Khi ô chat sẵn sàng, script bấm **dấu + / Upload & tools → Upload files / Tải tệp lên**,
    chọn ảnh, chờ tải xong rồi mới submit, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
-5. Xem kết quả rồi đóng các tab Gemini do script mở hoặc nhấn Ctrl+C.
+5. Script tự đóng trình duyệt và dọn checkpoint dù thành công hay lỗi.
+   Xem lại kết quả trong lịch sử Gemini; thêm ảnh rồi chạy lại Start khi cần.
 
 Script chờ giao diện chat mới ổn định, hỗ trợ cả `/app` và đường dẫn theo tài khoản
 như `/u/0/app`. Nếu Gemini khôi phục chat cũ, script bấm **New chat** rồi chờ chat
@@ -26,52 +28,50 @@ không bị tính nhầm thành một cuộc trò chuyện đang có nội dung.
 
 Lần sau chỉ cần thêm ảnh vào `img` và chạy lại. Phiên đăng nhập được giữ trong
 `.gemini-browser-native/chrome` hoặc `.gemini-browser-native/edge`, giống nhánh `copy_info_on_gemini`.
-Không chạy hai bản script cùng lúc hoặc chỉnh sửa/di chuyển ảnh khi đang chạy.
+Không chỉnh sửa/di chuyển ảnh khi đang chạy. Trên Windows, mở Start lần nữa sẽ
+dừng phiên cũ, dọn dữ liệu cũ rồi mới chạy phiên mới.
 
-## Dừng và xóa trạng thái bằng stop.bat
+## Một file Start: tự dừng và dọn trước/sau mỗi lần chạy
 
-Bấm đúp **`stop.bat`** và chờ thông báo **Đã hoàn tất Stop**, sau đó bấm
-`start_gemini.bat` để chạy lại từ đầu. Stop đóng uploader, bộ khởi động/cài thư viện,
-các tiến trình con và Chrome/Edge dùng profile riêng của script, rồi dọn:
+Chỉ cần **`start_gemini.bat`**. Chức năng Stop đã được gộp vào bộ khởi động;
+không còn file `stop.bat` riêng trong repository.
 
-- File kết nối/checkpoint, cổng debug và khóa trình duyệt cũ.
-- Tab/phiên khôi phục, bản nháp, dữ liệu trang web cục bộ và service worker.
-- Cache trình duyệt, lịch sử duyệt cục bộ và ảnh chuyển đổi tạm, kể cả ảnh tạm còn
-  sót khi tiến trình bị dừng cưỡng bức.
+1. Trước khi chạy trên Windows, Start dừng phiên uploader/trình duyệt cũ và dọn
+   dữ liệu còn sót, kể cả khi lần trước bị lỗi hoặc bị tắt cưỡng bức.
+2. Chạy tải ảnh, chờ ảnh tải xong hoàn toàn, gửi đúng prompt rồi xác nhận chat đã lưu.
+3. Khi gửi xong, lỗi, hết thời gian, hủy bằng Ctrl+C hoặc cài thư viện thất bại,
+   bộ khởi động luôn chạy bước dọn trong `finally`. Luồng gửi bình thường không
+   giữ tab mở chờ bạn đóng nữa.
 
-**Giữ nguyên ảnh gốc, mã nguồn, thư viện đã cài và dữ liệu đăng nhập Google.**
-Stop giữ file cookie, khóa mã hóa và dữ liệu tài khoản tại vị trí cũ; không xóa hay
-thay toàn bộ profile. Stop không thu hồi ảnh hoặc xóa lịch sử chat trên máy chủ Gemini.
-Những ảnh đã gửi và đã được xóa sau khi xác nhận ở lần chạy trước không thể khôi phục
-bằng Stop. Các cửa sổ BAT đang chờ nhấn phím có thể vẫn mở, nhưng không còn chạy tác vụ.
+Bước dọn xóa file kết nối/checkpoint, cổng debug, tab/phiên khôi phục, bản nháp,
+dữ liệu trang web cục bộ, service worker, cache, lịch sử duyệt cục bộ và ảnh
+chuyển đổi tạm. `.gemini-runtime` và tín hiệu Stop cũng được dọn. Các file khóa
+hệ điều hành rỗng có thể còn lại, nhưng không lưu tiến độ và tự nhả khi tiến trình thoát.
 
-Start giữ khóa hệ điều hành trong suốt bước chuẩn bị và tải ảnh; không mở hai lần
-chạy chồng nhau và không xóa tín hiệu dừng khi phiên cũ chưa thoát. Trong lúc Stop
-đang dọn, Start sẽ báo chờ Stop hoàn tất. Khóa tự nhả khi tiến trình bị tắt, nên file
-khóa còn trên ổ đĩa không gây kẹt lần sau. Mỗi lần chạy mở trình duyệt mới, không nối
-vào phiên cũ. Khi lỗi sau bước kết nối, uploader giữ ảnh chưa xác nhận và đóng phiên
-trình duyệt lỗi ngay, không tiếp tục chờ trên tab đã đóng.
-Lệnh đóng dùng kết nối có giới hạn thời gian; script chờ tiến trình trình duyệt
-thoát trước khi nhả phiên, tránh treo vô hạn khi Chrome đóng trước khi trả lời lệnh.
+**Giữ nguyên dữ liệu đăng nhập Google và ảnh gốc chưa được xác nhận gửi.**
+File cookie, khóa mã hóa và dữ liệu tài khoản được giữ tại vị trí cũ; không thay
+hoặc xóa toàn bộ profile. Ảnh đã gửi và xác nhận thành công vẫn được xóa theo luồng
+cũ, trừ khi dùng `--keep-images`. Dọn checkpoint không khôi phục ảnh đã xóa và
+không xóa chat/thu hồi ảnh trên máy chủ Gemini. Nếu lần trước đã bấm Gửi nhưng báo
+chưa xác nhận được, kiểm tra lịch sử Gemini trước khi chạy lại để tránh gửi trùng.
 
-Stop nhận diện lệnh Python chạy uploader hoặc `gemini_tool.launch`, rồi dừng đúng
-cây tiến trình bằng `taskkill /T /F`. Trình duyệt được nhận diện theo
-`--user-data-dir` của profile riêng; trình duyệt cá nhân khác không bị dừng theo tên
-chung. Nếu không dừng được tiến trình hoặc không dọn được dữ liệu, Stop báo lỗi.
-Không xem đó là reset thành công; đọc lỗi và chạy lại Stop trước khi Start.
-
-Các profile `.gemini-browser*` trong repository được tìm tự động. Phiên mới cũng
-ghi lại vị trí profile tùy chỉnh trong `.gemini-runtime`, để Stop tìm được ngay cả
-khi uploader đã bị tắt. Với profile ngoài repo của bản cũ chưa được ghi nhận,
-truyền lại đường dẫn:
+Muốn dừng ngay mà không bắt đầu lượt mới, dùng chính file Start:
 
 ```bat
-stop.bat --profile "D:\GeminiProfile"
+start_gemini.bat --stop
+start_gemini.bat --stop --profile "D:\GeminiProfile"
 ```
 
-Stop cần Python 3.10+ và Windows PowerShell có sẵn; không cài thêm thư viện.
-Nếu cửa sổ của công cụ chạy bằng quyền khác, Stop cần quyền truy cập tiến trình
-tương ứng. Khi cập nhật, lấy cả thư mục `gemini_tool` và hai file BAT.
+Hoặc nhấn Ctrl+C trong cửa sổ đang chạy. Chế độ `--attach-only` vẫn chờ bạn thao tác
+thủ công; khi đóng tab hoặc Ctrl+C, bước dọn cũng chạy. `--browser-info` và `--help`
+chỉ xem thông tin, không gọi Stop hay xóa công việc đang chạy.
+
+Trên Windows, bước dừng dùng PowerShell có sẵn và `taskkill /T /F`, nhận diện đúng
+uploader/profile của công cụ. Nó bảo vệ tiến trình Start hiện tại cùng các tiến
+trình `py.exe` cha để không tự tắt khi dọn. Nếu thiếu quyền dừng hoặc không dọn được
+file, script báo lỗi, không báo hoàn tất giả. Trình duyệt Chrome/Edge cá nhân ngoài
+profile riêng không bị đóng theo tên chung. Khi cập nhật, lấy cả thư mục `gemini_tool`
+và file `start_gemini.bat`.
 
 ## Trình duyệt từ copy_info_on_gemini
 
@@ -101,7 +101,7 @@ Các tùy chọn cũ `--polygon-python`, `--login`, `--browser`, `--browser-path
 Nếu chuyển nhánh trong **cùng thư mục** đã chạy bản `copy_info_on_gemini`, profile
 `.gemini-browser-native` có thể được dùng lại. Nếu hai bản nằm ở hai thư mục khác
 nhau, mỗi bản giữ phiên riêng. Không chạy đồng thời hai công cụ dùng cùng profile.
-Khi thành công, script đóng cửa sổ của profile riêng sau khi bạn xem xong các tab kết quả;
+Kết thúc lượt gửi, script tự đóng cửa sổ của profile riêng và dọn trạng thái;
 cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 
 ## Khi nào ảnh bị xóa?
@@ -185,12 +185,14 @@ chế độ chỉ đính kèm và việc giữ/xóa đúng ảnh gốc. File ki�
 Kiểm thử Stop mô phỏng việc dừng đúng cây tiến trình/profile, PID bị tái sử dụng,
 lỗi quyền truy cập, dọn trạng thái hỏng và giữ ảnh cùng dữ liệu đăng nhập.
 Đã chạy tiến trình uploader riêng với Chromium thật và trang Gemini mô phỏng:
-Stop trong lúc chờ tải ảnh hoặc xem tab kết quả đều đóng trình duyệt, xóa ảnh tạm,
+Hủy trong lúc chờ tải ảnh hoặc ở chế độ chỉ đính kèm đều đóng trình duyệt, xóa ảnh tạm,
 giữ ảnh gốc và trả mã dừng 130 mà không cần cưỡng bức tiến trình thử nghiệm.
 Đã kiểm tra thêm bằng Chromium mở qua CDP với profile lưu trên ổ đĩa: đóng trình
-duyệt giữa lúc tải → Stop → ba lần tải/submit liên tiếp, mỗi lần đều reset rồi
-mở lại. Cookie đăng nhập giả lập vẫn còn sau mỗi lần reset; ảnh gốc được giữ,
-ảnh tạm/tab/bản nháp được dọn. Đây là trang Gemini mô phỏng, không dùng tài khoản
+duyệt giữa lúc tải → lỗi hết thời gian tải → ba lần tải/submit liên tiếp, chạy qua
+bộ khởi động và tự dọn trước/sau, không gọi Stop thủ công. Cookie đăng nhập giả lập
+vẫn còn; ảnh chưa xác nhận được giữ, ảnh tạm/tab/bản nháp được dọn ngay sau mỗi lượt.
+Đã kiểm tra thêm lỗi cài thư viện, Ctrl+C, mã thoát khác 0 và việc Start thay thế
+phiên cũ đang giữ khóa, đồng thời bảo vệ chính nó cùng các tiến trình cha. Đây là trang Gemini mô phỏng, không dùng tài khoản
 Google thật. Phần dừng tiến trình Windows chưa được chạy trực tiếp trên Windows thật.
 
 Script test cục bộ đã truy cập Gemini thật ở phiên khách: ảnh vào vùng xem trước

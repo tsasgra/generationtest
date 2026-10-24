@@ -476,10 +476,11 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                 print("Đã dừng lần chạy lỗi; giữ ảnh chưa xác nhận và đóng phiên trình duyệt này.", file=sys.stderr)
                 raise
             if kept:
-                keep_tabs_open(pages)
                 raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
-            print("Hoàn tất. Các tab Gemini vẫn mở để bạn xem kết quả.")
-            keep_tabs_open(pages)
+            if attach_only:
+                keep_tabs_open(pages)
+            else:
+                print("Đã gửi và xác nhận ảnh. Đang đóng trình duyệt và dọn trạng thái lần chạy...", flush=True)
     except PlaywrightError as exc:
         check_stop()
         raise GeminiBrowserError(

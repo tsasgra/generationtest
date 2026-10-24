@@ -98,7 +98,7 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
     except (OSError, ValueError, KeyError, TypeError):
         pass
     if running:
-        raise ValueError("Trình duyệt của lần chạy trước vẫn mở. Chạy stop.bat và chờ dọn xong trước khi Start.")
+        raise ValueError("Trình duyệt của lần chạy trước vẫn mở. Chạy start_gemini.bat --stop rồi mở lại Start.")
     reset_browser_state(profile)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -192,6 +192,41 @@ def close_native_browser(_browser, session_file: Path) -> None:
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired as exc:
-        raise ValueError("Chrome/Edge chưa đóng hoàn toàn. Chạy stop.bat trước khi Start lại.") from exc
+        raise ValueError("Chrome/Edge chưa đóng hoàn toàn. Chạy start_gemini.bat --stop trước khi Start lại.") from exc
     _ACTIVE_BROWSERS.pop(session_file, None)
     session_file.unlink(missing_ok=True)
+
+
+def close_unfinished_browsers(roots: set[Path]) -> None:
+    """Also close native windows left by login/startup errors before CDP attach.
+    Only terminate Popen handles created by this Python process.
+    """
+    profiles = {(root / name).resolve() for root in roots for name in ("chrome", "edge")}
+    for session_file, process in list(_ACTIVE_BROWSERS.items()):
+        if session_file.parent not in profiles:
+            continue
+        if process.poll() is None:
+            try:
+                request_browser_close(session_file)
+            except Exception:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
+        _ACTIVE_BROWSERS.pop(session_file, None)
+        session_file.unlink(missing_ok=True)
+    for profile in profiles:
+        session_file = profile / "gemini-export-session.json"
+        try:
+            saved = json.loads(session_file.read_text(encoding="utf-8"))
+            info = debug_endpoint(saved["port"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if info["webSocketDebuggerUrl"] == saved.get("websocket"):
+            raise ValueError("Phiên trình duyệt cũ vẫn mở. Đóng cửa sổ đó rồi chạy lại Start; chưa xóa dữ liệu đang dùng.")

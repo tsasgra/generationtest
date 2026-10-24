@@ -53,26 +53,40 @@ def exclusive_lock(path: Path, timeout: float = 0):
 
 
 @contextmanager
-def upload_run():
+def upload_run(cleanup=None):
     # Start cannot enter while Stop is resetting a profile. Keep the uploader
     # lock through browser shutdown and temporary-file removal.
     with ExitStack() as stack:
         with exclusive_lock(ROOT / ".gemini-reset.lock"):
             stack.enter_context(exclusive_lock(ROOT / ".gemini-upload.lock"))
-        check_stop()
-        yield
+        try:
+            check_stop()
+            yield
+        finally:
+            if cleanup is not None:
+                with exclusive_lock(ROOT / ".gemini-reset.lock", timeout=2):
+                    cleanup()
 
 
 @contextmanager
-def start_run():
+def start_run(before_start=None, after_run=None, *, replace_existing: bool = False):
     with ExitStack() as stack:
-        with exclusive_lock(ROOT / ".gemini-reset.lock"):
+        with exclusive_lock(ROOT / ".gemini-reset.lock", timeout=2):
+            if replace_existing and before_start is not None:
+                before_start()
             stack.enter_context(exclusive_lock(ROOT / ".gemini-launch.lock"))
             # An older uploader must finish unwinding before cancellation is
             # cleared. Hold the launch lock through setup and the child run.
             with exclusive_lock(ROOT / ".gemini-upload.lock"):
+                if not replace_existing and before_start is not None:
+                    before_start()
                 STOP_FILE.unlink(missing_ok=True)
-        yield
+        try:
+            yield
+        finally:
+            if after_run is not None:
+                with exclusive_lock(ROOT / ".gemini-reset.lock", timeout=2):
+                    after_run()
 
 
 class StopRequested(KeyboardInterrupt):

@@ -13,6 +13,7 @@ from gemini_tool.control import RUNTIME, StopRequested, check_stop, upload_run
 from gemini_tool.images import ImageInputError, collect_images, prepare_images
 from gemini_tool.native import find_system_browser
 from gemini_tool.state import remember_profile
+from gemini_tool.stop import reset_run
 
 ROOT = Path(__file__).resolve().parent
 
@@ -50,10 +51,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Profile: {(args.profile / name).resolve()}")
             print("Đăng nhập trực tiếp trước, kết nối Playwright sau khi quay về Gemini.")
             return 0
-        with upload_run():
-            for selected in (args.profile, args.input):
-                if selected.resolve().is_relative_to(RUNTIME.resolve()):
-                    raise ValueError("Không đặt ảnh gốc hoặc profile đăng nhập trong .gemini-runtime (thư mục tạm).")
+        for selected in (args.profile, args.input):
+            if selected.resolve().is_relative_to(RUNTIME.resolve()):
+                raise ValueError("Không đặt ảnh gốc hoặc profile đăng nhập trong .gemini-runtime (thư mục tạm).")
+        def cleanup():
+            reset_run(RUNTIME.parent, [args.profile], stop_processes=False)
+            print("Đã dọn toàn bộ checkpoint, tab, bản nháp, cache và ảnh tạm; giữ đăng nhập Google.", flush=True)
+
+        with upload_run(cleanup=cleanup):
             files = collect_images(args.input.resolve(), args.recursive)
             remember_profile(RUNTIME, args.profile)
             # A forced Windows Stop bypasses Python's finally blocks. Keep all

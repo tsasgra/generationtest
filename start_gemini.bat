@@ -1,7 +1,7 @@
 @echo off
 setlocal DisableDelayedExpansion
 chcp 65001 >nul
-title Gemini Image Upload
+title Gemini Image Upload - Auto Reset
 set "GEMINI_EXIT_CODE=1"
 set "PYTHONUTF8=1"
 pushd "%~dp0"

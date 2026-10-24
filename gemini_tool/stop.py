@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Get-CimInstance Win32_Process |
     Where-Object { $_.Name -match '^(py|pythonw?|python\d+(\.\d+)*|chrome|msedge)\.exe$' } |
-    Select-Object ProcessId, Name, CommandLine,
+    Select-Object ProcessId, ParentProcessId, Name, CommandLine,
         @{Name='Created'; Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} |
     ConvertTo-Json -Compress
 """
@@ -201,22 +201,42 @@ def stop_all(directory: Path, extra: list[Path]) -> tuple[int, set[Path]]:
     for _ in range(3):
         processes = list_processes()
         roots.update(profile_roots(directory, processes, extra))
-        tools = [row for row in processes if is_tool_process(row, directory)]
+        protected = caller_processes(processes)
+        tools = [row for row in processes if row.get("ProcessId") not in protected
+                 and is_tool_process(row, directory)]
         for target in tools:
             stopped += terminate_tree(target)
         if tools:
             # The uploader may already have closed Chrome during cooperative
             # cancellation, or taskkill /T may have removed the whole tree.
             processes = list_processes()
-        browsers = browser_targets(processes, roots)
+        browsers = [row for row in browser_targets(processes, roots)
+                    if row.get("ProcessId") not in protected]
         for target in browsers:
             stopped += terminate_tree(target)
         if not tools and not browsers:
             return stopped, roots
     processes = list_processes()
-    if any(is_tool_process(row, directory) or is_tool_browser(row, roots) for row in processes):
+    protected = caller_processes(processes)
+    if any(row.get("ProcessId") not in protected
+           and (is_tool_process(row, directory) or is_tool_browser(row, roots)) for row in processes):
         raise RuntimeError("Vẫn còn tiến trình của công cụ; chưa xóa trạng thái. Bấm Stop lại.")
     return stopped, roots
+
+
+def caller_processes(processes: list[dict]) -> set[int]:
+    """Automatic reset runs inside Start: never taskkill Start or its py.exe
+    ancestors, since /T would also kill the reset which is currently running.
+    """
+    protected = {os.getpid(), os.getppid()}
+    parents = {row.get("ProcessId"): row.get("ParentProcessId") for row in processes}
+    pending = list(protected)
+    while pending:
+        parent = parents.get(pending.pop())
+        if type(parent) is int and parent > 0 and parent not in protected:
+            protected.add(parent)
+            pending.append(parent)
+    return protected
 
 
 def reset_connections(roots: set[Path]) -> int:
@@ -244,6 +264,22 @@ def reset_temporary_files(directory: Path) -> int:
     return removed
 
 
+def reset_run(directory: Path, extra: list[Path], *, stop_processes: bool = True) -> int:
+    """Shared Start/finally reset. Caller holds the reset lock throughout."""
+    if stop_processes and sys.platform == "win32":
+        request_stop(directory)
+        _, roots = stop_all(directory, extra)
+    else:
+        from .native import close_unfinished_browsers
+
+        roots = profile_roots(directory, [], extra)
+        close_unfinished_browsers(roots)
+    removed = reset_connections(roots)
+    removed += reset_temporary_files(directory)
+    (directory / ".gemini-stop-request").unlink(missing_ok=True)
+    return removed
+
+
 def request_stop(directory: Path) -> None:
     # Tell an in-flight BAT launcher not to advance from dependency checks into
     # installation/upload. The next explicit Start clears this cancellation.
@@ -260,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Profile riêng bên ngoài repo cần dừng/dọn; có thể truyền nhiều lần.")
     args = parser.parse_args(argv)
     if sys.platform != "win32":
-        print("stop.bat chỉ dùng trên Windows.", file=sys.stderr)
+        print("Chế độ --stop chỉ dùng trên Windows.", file=sys.stderr)
         return 1
     try:
         # Keep Start outside the entire reset, including the interval between
