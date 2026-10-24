@@ -3,7 +3,8 @@
 Đặt ảnh bài 1 vào **`img/img1/`**, bài 2 vào **`img/img2/`**, ... bài 10 vào **`img/img10/`**,
 rồi chạy **`start_gemini.bat`** một lần. Thư mục **`img/`** nằm cạnh script;
 10 thư mục con `img1` đến `img10` được tạo lại nếu thiếu. Mỗi thư mục có thể chứa nhiều ảnh của cùng một bài, tối đa **10 ảnh**.
-Script xử lý theo đúng thứ tự số **1 → 10**, bỏ qua thư mục trống. Mỗi bài dùng
+Script xử lý theo đúng thứ tự số **1 → 10**, bỏ qua thư mục trống hoặc không tìm
+thấy ảnh hợp lệ (chỉ có file rỗng, file hỏng hoặc file không phải ảnh). Mỗi bài dùng
 một chat mới, gửi toàn bộ ảnh hợp lệ trong thư mục kèm đúng một dòng prompt
 `apply polygon-problem-setter skill`. Chỉ sau khi Gemini hoàn tất **10 Part**,
 xác nhận chat đã lưu, ghi đủ 10 file vào **`problem/problemN/`** và xử lý ảnh gốc,
@@ -155,7 +156,10 @@ script mới tải lại chat để xác nhận ảnh đã lưu và ghi trọn b
   được giữ, ảnh bài lỗi và các bài chưa chạy được giữ. Chạy lại sẽ bỏ qua thư mục đã
   hết ảnh. `--keep-images` giữ cả ảnh thành công, nên chạy lại sẽ gửi lại những bài đó.
 - File không phải ảnh, hỏng hoặc chưa hỗ trợ được bỏ qua và giữ nguyên; ảnh hợp lệ
-  khác vẫn được xử lý. Nếu không có ảnh hợp lệ, không mở trình duyệt.
+  khác vẫn được xử lý. Thư mục trống hoặc không có ảnh hợp lệ được bỏ qua để chạy
+  thư mục kế tiếp, không tạo chat và không thay kết quả cũ của thư mục đã bỏ qua.
+  Ví dụ `img/img2` không có ảnh thì tiếp tục `img/img3`, lưu vào `problem/problem3`.
+  Nếu cả 10 thư mục không có ảnh hợp lệ, script kết thúc bình thường, không mở trình duyệt.
 - GIF động/TIFF nhiều trang chỉ chuyển khung/trang đầu, nên **giữ bản gốc nhiều
   khung/trang** để không xóa phần chưa tải. Script báo rõ trường hợp này.
 - Xóa trực tiếp khỏi ổ đĩa, không đưa vào thùng rác. Dùng `--keep-images` để giữ bản gốc.

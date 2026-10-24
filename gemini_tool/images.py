@@ -101,7 +101,8 @@ def snapshot_source(source: Path, target: Path) -> SourceSnapshot:
 
 
 def prepare_images(files: list[Path], destination: Path,
-                   max_file_mb: float = 20, *, skip_invalid: bool = False) -> list[PreparedImage]:
+                   max_file_mb: float = 20, *, skip_invalid: bool = False,
+                   allow_empty: bool = False) -> list[PreparedImage]:
     from PIL import Image, ImageOps
     from pillow_heif import register_heif_opener
 
@@ -152,7 +153,7 @@ def prepare_images(files: list[Path], destination: Path,
             print(f"Bỏ qua, giữ nguyên file: {error}", file=sys.stderr)
         finally:
             original_copy.unlink(missing_ok=True)
-    if not prepared:
+    if not prepared and not allow_empty:
         raise ImageInputError("Không nhận diện được ảnh hợp lệ trong thư mục. Chưa mở Gemini hoặc xóa file nào.")
     return prepared
 

@@ -94,7 +94,10 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"{folder.name}: thư mục trống, bỏ qua.")
                             continue
                         images = prepare_images(files, Path(directory) / folder.name,
-                                                args.max_file_mb, skip_invalid=True)
+                                                args.max_file_mb, skip_invalid=True, allow_empty=True)
+                        if not images:
+                            print(f"img/{folder.name}: không tìm thấy ảnh hợp lệ, bỏ qua và chuyển bài tiếp theo.")
+                            continue
                         if len(images) > 10:
                             raise ImageInputError(
                                 f"{folder.name} có {len(images)} ảnh hợp lệ, vượt giới hạn 10 ảnh/chat. "
