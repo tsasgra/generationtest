@@ -1,11 +1,12 @@
 # Tự tải ảnh trong img lên Gemini
 
 Đặt ảnh vào **`img/`** rồi chạy **`start_gemini.bat`**. Script tự nhận dạng ảnh
-theo nội dung file, mở chat mới, gửi ảnh và **xóa ảnh gốc đã xác nhận gửi thành công**.
-Start tự dừng/dọn phiên cũ trước khi chạy. Sau khi gửi xong hoặc gặp lỗi, script
+theo nội dung file, mở chat mới, gửi ảnh, chờ Gemini trả đủ **10 Part**, lưu vào
+**`problem/`**, rồi xóa ảnh gốc đã xác nhận thành công.
+Start tự dừng/dọn phiên cũ trước khi chạy. Sau khi lưu đủ 10 file hoặc gặp lỗi, script
 tự đóng trình duyệt và xóa trạng thái lần chạy; không cần mở Stop riêng.
-Nhánh này chỉ có luồng tải ảnh từ file trong `img/` lên Gemini và submit;
-không có thao tác copy thông tin hoặc đăng bài lên Polygon.
+Luồng chạy gồm tải ảnh trong `img/`, gửi đúng prompt và lưu 10 phần trả lời
+cục bộ theo nhánh `copy_info_on_gemini`. Không đăng bài lên Polygon.
 **Bản chạy trong repository yêu cầu đăng nhập Google trước khi tải ảnh.**
 Chỉ script kiểm thử cục bộ trong `work/` được thử phiên khách; các script này
 không được đưa lên GitHub và không tạo tùy chọn bỏ qua đăng nhập cho bản chạy.
@@ -17,8 +18,10 @@ không được đưa lên GitHub và không tạo tùy chọn bỏ qua đăng n
    File chạy tự tạo `.venv-gemini` và cài thư viện cần thiết.
 3. Đăng nhập Google trong cửa sổ Chrome/Edge được mở. Script chờ đăng nhập trước khi kết nối tự động.
 4. Khi ô chat sẵn sàng, script bấm **dấu + / Upload & tools → Upload files / Tải tệp lên**,
-   chọn ảnh, chờ tải xong rồi mới submit, kiểm tra chat đã lưu và xóa ảnh đã xác nhận.
-5. Script tự đóng trình duyệt và dọn checkpoint dù thành công hay lỗi.
+   chọn ảnh, chờ tải xong rồi mới submit. Script chờ Gemini hoàn tất đủ 10 Part,
+   xác nhận chat đã lưu, ghi 10 file vào `problem` rồi mới xóa ảnh đã xác nhận.
+5. Khi đủ 10 file đầu ra, script mới tự đóng trình duyệt và dọn checkpoint.
+   Nếu hết thời gian chờ hoặc có lỗi, script báo lỗi và vẫn dọn dữ liệu chạy tạm.
    Xem lại kết quả trong lịch sử Gemini; thêm ảnh rồi chạy lại Start khi cần.
 
 Giữ thư mục **`.venv-gemini`** chứa các package đã cài. Start kiểm tra thư viện
@@ -44,8 +47,9 @@ không còn file `stop.bat` riêng trong repository.
 
 1. Trước khi chạy trên Windows, Start dừng phiên uploader/trình duyệt cũ và dọn
    dữ liệu còn sót, kể cả khi lần trước bị lỗi hoặc bị tắt cưỡng bức.
-2. Chạy tải ảnh, chờ ảnh tải xong hoàn toàn, gửi đúng prompt rồi xác nhận chat đã lưu.
-3. Khi gửi xong, lỗi, hết thời gian, hủy bằng Ctrl+C hoặc cài thư viện thất bại,
+2. Chạy tải ảnh, chờ ảnh tải xong hoàn toàn, gửi đúng prompt, chờ đủ 10 Part
+   và lưu bộ file `problem` sau khi xác nhận chat đã lưu.
+3. Khi lưu xong 10 Part, lỗi, hết thời gian, hủy bằng Ctrl+C hoặc cài thư viện thất bại,
    bộ khởi động luôn chạy bước dọn trong `finally`. Luồng gửi bình thường không
    giữ tab mở chờ bạn đóng nữa.
 
@@ -54,10 +58,10 @@ dữ liệu trang web cục bộ, service worker, cache, lịch sử duyệt c�
 chuyển đổi tạm. `.gemini-runtime` và tín hiệu Stop cũng được dọn. Các file khóa
 hệ điều hành rỗng có thể còn lại, nhưng không lưu tiến độ và tự nhả khi tiến trình thoát.
 
-**Giữ nguyên dữ liệu đăng nhập Google và ảnh gốc chưa được xác nhận gửi.**
+**Giữ nguyên thư viện, dữ liệu đăng nhập Google, bộ `problem` đã lưu và ảnh gốc chưa hoàn tất.**
 File cookie, khóa mã hóa và dữ liệu tài khoản được giữ tại vị trí cũ; không thay
-hoặc xóa toàn bộ profile. Ảnh đã gửi và xác nhận thành công vẫn được xóa theo luồng
-cũ, trừ khi dùng `--keep-images`. Dọn checkpoint không khôi phục ảnh đã xóa và
+hoặc xóa toàn bộ profile. Ảnh chỉ được xóa sau khi xác nhận chat và lưu đủ
+10 Part, trừ khi dùng `--keep-images`. Dọn checkpoint không khôi phục ảnh đã xóa và
 không xóa chat/thu hồi ảnh trên máy chủ Gemini. Nếu lần trước đã bấm Gửi nhưng báo
 chưa xác nhận được, kiểm tra lịch sử Gemini trước khi chạy lại để tránh gửi trùng.
 
@@ -107,7 +111,7 @@ Các tùy chọn cũ `--polygon-python`, `--login`, `--browser`, `--browser-path
 Nếu chuyển nhánh trong **cùng thư mục** đã chạy bản `copy_info_on_gemini`, profile
 `.gemini-browser-native` có thể được dùng lại. Nếu hai bản nằm ở hai thư mục khác
 nhau, mỗi bản giữ phiên riêng. Không chạy đồng thời hai công cụ dùng cùng profile.
-Kết thúc lượt gửi, script tự đóng cửa sổ của profile riêng và dọn trạng thái;
+Sau khi lưu đủ 10 Part của lượt gửi, script tự đóng cửa sổ profile riêng và dọn trạng thái;
 cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 
 ## Khi nào ảnh bị xóa?
@@ -121,13 +125,18 @@ tải bên ngoài đều phải kết thúc. Các điều kiện phải ổn đ�
 sau khi điền nội dung gửi kèm; chỉ thấy tên file chưa đủ để submit. Nếu hết
 `--upload-timeout`, script báo lỗi và giữ ảnh, không cố bấm Gửi.
 
-Sau khi submit, script đợi tin nhắn có đủ ảnh, **tải lại chat**,
-và phải thấy lại tin nhắn cùng ảnh trong chat đã lưu rồi mới xóa file tương ứng.
-Chỉ thấy ảnh trong ô soạn thảo chưa đủ điều kiện xóa.
+Các thao tác bấm dấu +, chọn Upload files, đưa ảnh vào và điền/gửi prompt được
+ngắt bằng khoảng nghỉ **0,8 giây**. Sau khi nhập prompt, script kiểm tra lại nội dung
+ô chat còn đúng trước khi bấm Gửi; nếu ô chat bị xóa thì báo lỗi và giữ ảnh.
+
+Sau khi submit, script giữ chat mở để Gemini trả lời, **không tải lại khi đang sinh**.
+Chỉ khi Gemini ngừng sinh, đủ Part 1–10 và nội dung ổn định ít nhất **hai giây**,
+script mới tải lại chat để xác nhận ảnh đã lưu và ghi trọn bộ 10 file.
+Ảnh gốc chỉ bị xóa sau cả hai bước xác nhận và ghi file thành công.
 
 - Chỉ xóa file thuộc nhóm đã gửi và có nội dung/thông tin file khớp bản đã tải.
   File mới thêm vào `img`, file thay đổi trong lúc chạy và `.gitkeep` được giữ lại.
-- Lỗi đăng nhập, tải ảnh, gửi tin nhắn hoặc không xác nhận được sau khi tải lại:
+- Lỗi đăng nhập, tải/gửi ảnh, thiếu/trùng Part, ghi file lỗi hoặc không xác nhận được sau khi tải lại:
   giữ ảnh chưa xác nhận và trả lỗi. Không tự gửi lại; kiểm tra chat trước khi chạy lại
   nếu lần trước đã bấm Gửi, để tránh gửi trùng.
 - Nếu nhóm trước thành công nhưng nhóm sau lỗi, chỉ ảnh của nhóm trước đã bị xóa.
@@ -136,6 +145,42 @@ Chỉ thấy ảnh trong ô soạn thảo chưa đủ điều kiện xóa.
 - GIF động/TIFF nhiều trang chỉ chuyển khung/trang đầu, nên **giữ bản gốc nhiều
   khung/trang** để không xóa phần chưa tải. Script báo rõ trường hợp này.
 - Xóa trực tiếp khỏi ổ đĩa, không đưa vào thùng rác. Dùng `--keep-images` để giữ bản gốc.
+
+## Bộ 10 file trong problem
+
+Tên và nội dung file giữ đúng định dạng của
+[`copy_info_on_gemini`](https://github.com/tsasgra/generationtest/blob/e5ee49144ef20f7d5b02e8aa31b69f8056a0125c/gemini_export.bat).
+Mỗi Part phải có đúng một khối code; Part 6 (note) được phép để trống. Nội dung
+được lưu UTF-8, giữ nguyên thụt dòng, LaTeX và mã nguồn.
+
+| Part | File |
+| --- | --- |
+| 1 | `name problem.txt` |
+| 2 | `name.txt` |
+| 3 | `lengend.txt` |
+| 4 | `input.txt` |
+| 5 | `output.txt` |
+| 6 | `note.txt` |
+| 7 | `checker.txt` |
+| 8 | `gen.txt` |
+| 9 | `script_sinh_test.txt` |
+| 10 | `solution.txt` |
+
+Một nhóm ảnh/chat lưu trực tiếp trong `problem/`. Nếu có nhiều nhóm, mỗi chat
+lưu một bộ riêng trong `problem/chat_0001/`, `problem/chat_0002/`, ... để giữ đủ
+kết quả của từng nhóm. Bộ cũ chỉ được thay khi đã chuẩn bị đủ 10 file mới;
+không ghi dở dang hoặc xóa file lạ trong thư mục đầu ra.
+Khi `problem` đã dùng thư mục con cho nhiều chat, các lượt sau tiếp tục cách bố
+trí này; một chat sẽ lưu vào `problem/chat_0001/` và giữ nguyên các bộ còn lại.
+
+Mặc định chờ Gemini tối đa **600 giây mỗi chat**. Có thể tăng thời gian:
+
+```bat
+start_gemini.bat --response-timeout 1800
+```
+
+Hết thời gian thì giữ ảnh gốc và bộ `problem` cũ, báo lỗi rồi dọn dữ liệu chạy tạm.
+Các bộ `problem` hoàn thành được giữ qua Start/Stop và được loại khỏi Git.
 
 ## Tùy chọn thường dùng
 
@@ -151,7 +196,7 @@ start_gemini.bat --attach-only
 `--prompt` thay nội dung gửi kèm. `--recursive` đọc cả các thư mục con trong `img`.
 
 Các tùy chọn khác: `--input THU_MUC`, `--batch-size 1` (1–10),
-`--upload-timeout 300`, `--login-timeout 600`, `--max-file-mb 20`,
+`--upload-timeout 300`, `--response-timeout 1800`, `--login-timeout 600`, `--max-file-mb 20`,
 `--profile THU_MUC_RIENG`.
 `img` mặc định luôn nằm cạnh script, kể cả khi chạy từ thư mục khác.
 
@@ -180,7 +225,7 @@ trước khi chạy. Không cần xóa profile cũ của bản trước để d�
 ## Git và kiểm thử
 
 GitHub chỉ chứa mã chạy, thư viện cần cài, file `.bat`, hướng dẫn và `img/.gitkeep`.
-Ảnh, profile đăng nhập, môi trường Python, file test/example đều được loại khỏi Git.
+Ảnh, `problem`, profile đăng nhập, môi trường Python, file test/example đều được loại khỏi Git.
 Với `--input`/`--profile` tự đặt, dùng đường dẫn ngoài repo hoặc bổ sung vào `.gitignore`.
 
 Kiểm thử bằng Chromium trên trang mô phỏng bao gồm menu thêm ảnh hiện tại,
@@ -206,4 +251,8 @@ qua ô chọn ảnh riêng nhưng dừng ở 50% sau 180 giây; chưa xác nhậ
 Kết quả test khách không thay đổi yêu cầu đăng nhập của mã được đẩy lên nhánh này.
 **Chưa xác minh gửi ảnh end-to-end trên tài khoản Gemini thật hoặc chạy `.bat`
 trên Windows thật**: môi trường phát triển chưa có phiên Google đăng nhập.
-Nếu giao diện thay đổi khiến không xác nhận được ảnh, script báo lỗi và giữ ảnh.
+Đã kiểm thử thêm phản hồi đang sinh, Part 10 đến muộn, mã phần cuối còn thay đổi,
+thiếu/trùng Part, phản hồi cũ/ẩn, ghi file lỗi và hủy trong lúc chờ. Kiểm tra luồng
+hoàn chỉnh xác nhận không reload, ghi file, xóa ảnh hoặc đóng phiên trước khi đủ
+10 phần; bộ `problem` hoàn thành vẫn được giữ sau khi dọn trạng thái.
+Nếu giao diện thay đổi khiến không xác nhận được ảnh hoặc 10 Part, script báo lỗi và giữ ảnh.

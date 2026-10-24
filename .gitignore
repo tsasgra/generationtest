@@ -15,3 +15,5 @@ img/*
 /.gemini-stop-request
 /.gemini-*.lock
 /.gemini-runtime/
+/problem/
+/.gemini-export-*/

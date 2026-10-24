@@ -11,6 +11,7 @@ from urllib.parse import urlencode, urlsplit
 from .control import check_stop, exclusive_lock
 from .images import PreparedImage, delete_uploaded
 from .native import close_native_browser, start_native_browser, wait_for_manual_login
+from .parts import output_destinations, validate_output, wait_for_parts, write_parts
 
 GEMINI_URL = "https://gemini.google.com/app?hl=en"
 EDITOR = 'rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]'
@@ -29,10 +30,21 @@ SEND_NAME = re.compile(r"^(send|send message|submit|gửi|gửi tin nhắn)(\s.*
 ACCOUNT_NAME = re.compile(r"^(Google Account|Tài khoản Google)(\s*:|\s*$)", re.I)
 SIGN_IN_NAME = re.compile(r"^\s*(sign in|đăng nhập)\s*$", re.I)
 NEW_CHAT_NAME = re.compile(r"^\s*(?:new chat|cuộc trò chuyện mới|đoạn chat mới|chat mới)(?:\s*\(.*\))?\s*$", re.I)
+ACTION_DELAY = 0.8
 
 
 class GeminiBrowserError(RuntimeError):
     """Browser/UI did not confirm the requested operation."""
+
+
+def pause_after_action(page):
+    """Let Gemini settle between clicks while still processing Stop/events."""
+    deadline = time.monotonic() + ACTION_DELAY
+    while time.monotonic() < deadline:
+        check_stop()
+        if page.is_closed():
+            raise GeminiBrowserError("Tab Gemini đã đóng giữa các thao tác tải ảnh.")
+        page.wait_for_timeout(min(100, max(1, (deadline - time.monotonic()) * 1000)))
 
 
 @contextmanager
@@ -225,6 +237,7 @@ def choose_files(page, paths: list[Path], timeout: float = 15):
             check_stop()
             if choosers:
                 choosers[-1].set_files(values)
+                pause_after_action(page)
                 return
             if selected_upload:
                 # The file input may be inserted after clicking Upload files
@@ -232,12 +245,14 @@ def choose_files(page, paths: list[Path], timeout: float = 15):
                 file_input = _file_input(page)
                 if file_input is not None:
                     file_input.set_input_files(values)
+                    pause_after_action(page)
                     return
             else:
                 option = _upload_option(page)
                 if option is not None:
                     option.click()
                     selected_upload = True
+                    pause_after_action(page)
                     continue
                 if opened_menu and _first_ready(page.locator(UPLOAD_MENU).get_by_text(re.compile(
                     r"sign in to try tools|đăng nhập để (?:dùng thử|thử|sử dụng)", re.I,
@@ -253,12 +268,14 @@ def choose_files(page, paths: list[Path], timeout: float = 15):
                         if button is not None:
                             button.click()
                             opened_menu = True
+                            pause_after_action(page)
                             continue
                         # Retain compatibility with layouts exposing an input
                         # directly in the composer without an upload menu.
                         file_input = _file_input(composer)
                         if file_input is not None:
                             file_input.set_input_files(values)
+                            pause_after_action(page)
                             return
             page.wait_for_timeout(100)
         if selected_upload:
@@ -400,18 +417,28 @@ def wait_for_saved_message(page, arguments: dict, timeout: float):
 
 def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
     check_stop()
+    pause_after_action(page)
     editor = page.locator(EDITOR).first
     editor.fill(prompt)
+    pause_after_action(page)
     # Filling the prompt can update the composer. Recheck the attachments and
     # enabled Send control together before clicking, even when called directly.
     button = wait_for_upload(page, paths, timeout, require_send=True)
     check_stop()
+    if editor.inner_text().strip() != prompt.strip():
+        raise GeminiBrowserError("Ô chat đã thay đổi hoặc bị xóa nội dung; chưa bấm Gửi, giữ nguyên ảnh gốc.")
     button.click(timeout=min(3000, timeout * 1000))
+    pause_after_action(page)
+    arguments = {"editorSelector": EDITOR, "prompt": prompt, "names": [p.name for p in paths]}
+    wait_for_saved_message(page, arguments, timeout)
+
+
+def verify_saved_upload(page, prompt: str, paths: list[Path], timeout: float):
     try:
         arguments = {"editorSelector": EDITOR, "prompt": prompt, "names": [p.name for p in paths]}
-        wait_for_saved_message(page, arguments, timeout)
-        # A cleared composer/optimistic preview alone is not a durable upload.
-        # Require the sent images again after fetching the conversation anew.
+        # Reload only AFTER the response finished, so fetching the conversation
+        # does not interrupt Gemini while it is still generating the ten parts.
+        check_stop()
         page.reload(wait_until="commit", timeout=min(10000, timeout * 1000))
         wait_for_saved_message(page, arguments, timeout)
     except Exception as exc:
@@ -440,11 +467,18 @@ def keep_tabs_open(pages):
 def upload_images(images: list[PreparedImage], *, profile: Path,
                   login_timeout: float, upload_timeout: float,
                   batch_size: int, prompt: str, keep_images: bool = False,
-                  attach_only: bool = False):
+                  attach_only: bool = False, output: Path | None = None,
+                  response_timeout: float = 600):
     from playwright.sync_api import Error as PlaywrightError
 
     pages = []
     kept = []
+    output = output or Path(__file__).resolve().parent.parent / "problem"
+    count = (len(images) + batch_size - 1) // batch_size
+    destinations = output_destinations(output, count)
+    if not attach_only:
+        for destination in destinations:
+            validate_output(destination)
     try:
         with open_browser(profile, login_timeout) as context:
             print("Đã kết nối Chrome/Edge sau bước đăng nhập Gemini.")
@@ -460,6 +494,7 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                         page = context.new_page()
                     pages.append(page)
                     new_chat(page, login_timeout)
+                    pause_after_action(page)
                     paths = [item.upload for item in batch]
                     choose_files(page, paths)
                     print(f"Chat {len(pages)}: đang chờ {len(batch)} ảnh tải xong hoàn toàn...", flush=True)
@@ -467,6 +502,13 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
                     print(f"Chat {len(pages)}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
                     if not attach_only:
                         send_prompt(page, prompt, paths, upload_timeout)
+                        print(f"Chat {len(pages)}: đã gửi ảnh; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
+                        parts = wait_for_parts(page, prompt, response_timeout)
+                        verify_saved_upload(page, prompt, paths, upload_timeout)
+                        check_stop()
+                        destination = destinations[len(pages) - 1]
+                        write_parts(parts, destination)
+                        print(f"Đã lưu đủ 10 file .txt tại: {destination.resolve()}", flush=True)
                         print(f"Đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}")
                         if not keep_images:
                             kept.extend(delete_uploaded(batch))
@@ -480,7 +522,7 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
             if attach_only:
                 keep_tabs_open(pages)
             else:
-                print("Đã gửi và xác nhận ảnh. Đang đóng trình duyệt và dọn trạng thái lần chạy...", flush=True)
+                print("Đã lưu đủ 10 Part cho từng chat. Đang đóng trình duyệt và dọn trạng thái lần chạy...", flush=True)
     except PlaywrightError as exc:
         check_stop()
         raise GeminiBrowserError(

@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="In tên và đường dẫn Chrome/Edge sẽ dùng rồi thoát; không cần ảnh.")
     parser.add_argument("--login-timeout", type=positive_number, default=600, help="Thời gian chờ đăng nhập, giây.")
     parser.add_argument("--upload-timeout", type=positive_number, default=180, help="Thời gian chờ tải ảnh, giây.")
+    parser.add_argument("--response-timeout", type=positive_number, default=600,
+                        help="Thời gian chờ Gemini hoàn tất đủ 10 Part để lưu vào problem, giây.")
     parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10, help="Tối đa 10 ảnh mỗi chat mới.")
     parser.add_argument("--max-file-mb", type=positive_number, default=20, help="Giới hạn MiB mỗi PNG sau chuyển đổi.")
     parser.add_argument("--prompt", default="apply polygon setter skill", help="Nội dung gửi kèm ảnh trong mỗi chat.")
@@ -76,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
                     login_timeout=args.login_timeout, upload_timeout=args.upload_timeout,
                     batch_size=args.batch_size, prompt=args.prompt,
                     keep_images=args.keep_images, attach_only=args.attach_only,
+                    output=RUNTIME.parent / "problem", response_timeout=args.response_timeout,
                 )
         return 0
     except (ImageInputError, GeminiBrowserError, ValueError, OSError) as exc:
