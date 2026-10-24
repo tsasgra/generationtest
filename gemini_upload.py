@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("Không đặt ảnh gốc hoặc profile đăng nhập trong .gemini-runtime (thư mục tạm).")
         def cleanup():
             reset_run(RUNTIME.parent, [args.profile], stop_processes=False)
-            print("Đã dọn toàn bộ checkpoint, tab, bản nháp, cache và ảnh tạm; giữ đăng nhập Google.", flush=True)
+            print("Đã dọn toàn bộ checkpoint, tab, bản nháp, cache và ảnh tạm; giữ thư viện đã cài và đăng nhập Google.", flush=True)
 
         with upload_run(cleanup=cleanup):
             files = collect_images(args.input.resolve(), args.recursive)

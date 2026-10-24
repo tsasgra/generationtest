@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     def reset(message):
         print(message, flush=True)
         reset_run(ROOT, [selected.profile])
-        print("Đã dọn trạng thái cục bộ; giữ đăng nhập Google và ảnh gốc còn lại.", flush=True)
+        print("Đã dọn trạng thái cục bộ; giữ .venv-gemini, đăng nhập Google và ảnh gốc còn lại.", flush=True)
 
     try:
         for path in (selected.profile, selected.input):
@@ -45,9 +45,11 @@ def main(argv: list[str] | None = None) -> int:
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if check.returncode:
                 check_stop()
-                print("Đang cài thư viện cho Gemini...", flush=True)
+                print("Đang bổ sung thư viện còn thiếu vào .venv-gemini...", flush=True)
                 subprocess.run([str(python), "-m", "pip", "install", "-r",
                                 str(ROOT / "requirements-gemini.txt")], check=True)
+            else:
+                print("Đã có đủ thư viện trong .venv-gemini; dùng lại và bỏ qua cài đặt.", flush=True)
             check_stop()
             return subprocess.call([str(python), "-u", str(ROOT / "gemini_upload.py"),
                                     *arguments])

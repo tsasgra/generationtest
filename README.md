@@ -21,6 +21,12 @@ không được đưa lên GitHub và không tạo tùy chọn bỏ qua đăng n
 5. Script tự đóng trình duyệt và dọn checkpoint dù thành công hay lỗi.
    Xem lại kết quả trong lịch sử Gemini; thêm ảnh rồi chạy lại Start khi cần.
 
+Giữ thư mục **`.venv-gemini`** chứa các package đã cài. Start kiểm tra thư viện
+trước mỗi lần chạy; khi đã đủ và dùng được, màn hình báo **dùng lại và bỏ qua
+cài đặt**. Khi thiếu thư viện, Start gọi pip để bổ sung; dòng `Requirement already
+satisfied` nghĩa là package đó đã có sẵn. Bước reset trước/sau lượt chạy và chế
+độ `--stop` đều giữ nguyên môi trường Python này.
+
 Script chờ giao diện chat mới ổn định, hỗ trợ cả `/app` và đường dẫn theo tài khoản
 như `/u/0/app`. Nếu Gemini khôi phục chat cũ, script bấm **New chat** rồi chờ chat
 trống trước khi thêm ảnh. Nội dung lịch sử ẩn và ký tự trắng của trình soạn thảo
