@@ -3,12 +3,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
 import os
+from threading import Event
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
 STOP_FILE = ROOT / ".gemini-stop-request"
 RUNTIME = ROOT / ".gemini-runtime"
+_CANCELLATION: ContextVar[Event | None] = ContextVar("gemini_cancellation", default=None)
 
 
 class AlreadyRunning(ValueError):
@@ -94,8 +97,19 @@ class StopRequested(KeyboardInterrupt):
 
 
 def check_stop() -> None:
-    if STOP_FILE.exists():
+    cancellation = _CANCELLATION.get()
+    if STOP_FILE.exists() or (cancellation is not None and cancellation.is_set()):
         raise StopRequested("Đã nhận yêu cầu Stop.")
+
+
+@contextmanager
+def cancellation_scope(cancellation: Event):
+    """Let existing UI/file waits react to cancellation in this worker only."""
+    token = _CANCELLATION.set(cancellation)
+    try:
+        yield
+    finally:
+        _CANCELLATION.reset(token)
 
 
 def sleep(seconds: float) -> None:

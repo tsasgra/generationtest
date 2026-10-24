@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 import re
 import sys
 import time
+from threading import Event
 from urllib.parse import urlencode, urlsplit
 
-from .control import check_stop, exclusive_lock
+from .control import cancellation_scope, check_stop, exclusive_lock
 from .images import PreparedImage, delete_uploaded
 from .native import close_native_browser, start_native_browser, wait_for_manual_login
 from .parts import output_destinations, validate_output, wait_for_parts, write_parts
@@ -56,10 +58,8 @@ def pause_after_action(page):
 
 
 @contextmanager
-def open_browser(profile: Path, login_timeout: float):
-    """Use copy_info_on_gemini's native login before connecting automation."""
-    from playwright.sync_api import Error as PlaywrightError, sync_playwright
-
+def logged_in_browser(profile: Path, login_timeout: float):
+    """Own one native browser; sign in before any automation connects."""
     with exclusive_lock(profile.resolve() / ".gemini-profile.lock"):
         check_stop()
         login_url = "https://accounts.google.com/ServiceLogin?" + urlencode({
@@ -70,22 +70,39 @@ def open_browser(profile: Path, login_timeout: float):
             wait_for_manual_login(port, old_tabs, timeout=login_timeout)
         except (OSError, ValueError) as exc:
             raise GeminiBrowserError(f"{exc}\nChưa tải hoặc xóa ảnh của lần chạy này.") from exc
-        # Do not start the Playwright driver or attach CDP during Google sign-in.
-        with sync_playwright() as playwright:
-            try:
-                browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=5000)
-            except PlaywrightError as exc:
-                check_stop()
-                raise GeminiBrowserError(
-                    "Không kết nối được Chrome/Edge vừa đăng nhập. Đóng cửa sổ của script rồi chạy lại. "
-                    "Chưa tải hoặc xóa ảnh."
-                ) from exc
-            try:
-                if not browser.contexts:
-                    raise GeminiBrowserError("Không tìm thấy phiên Chrome/Edge vừa đăng nhập; ảnh được giữ nguyên.")
-                yield browser.contexts[0]
-            finally:
-                close_native_browser(browser, session_file)
+        try:
+            yield port
+        finally:
+            close_native_browser(None, session_file)
+
+
+@contextmanager
+def browser_context(port: int):
+    """Each thread owns its driver and CDP connection, sharing only Chrome."""
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+
+    check_stop()
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=5000)
+        except PlaywrightError as exc:
+            check_stop()
+            raise GeminiBrowserError(
+                "Không kết nối được Chrome/Edge vừa đăng nhập. Đóng cửa sổ của script rồi chạy lại. "
+                "Chưa tải hoặc xóa ảnh."
+            ) from exc
+        if not browser.contexts:
+            raise GeminiBrowserError("Không tìm thấy phiên Chrome/Edge vừa đăng nhập; ảnh được giữ nguyên.")
+        # Leaving this context disconnects this driver. Only logged_in_browser
+        # may close the native browser, after every worker has finished.
+        yield browser.contexts[0]
+
+
+@contextmanager
+def open_browser(profile: Path, login_timeout: float):
+    with logged_in_browser(profile, login_timeout) as port:
+        with browser_context(port) as context:
+            yield context
 
 
 def wait_for_editor(page, timeout: float):
@@ -472,11 +489,93 @@ def keep_tabs_open(pages):
                 raise
 
 
+def _process_task(task: UploadTask, page, *, login_timeout: float, upload_timeout: float,
+                  prompt: str, keep_images: bool, attach_only: bool, response_timeout: float):
+    check_stop()
+    print(f"Bắt đầu {task.label}: {len(task.images)} ảnh.", flush=True)
+    new_chat(page, login_timeout)
+    pause_after_action(page)
+    paths = [item.upload for item in task.images]
+    choose_files(page, paths)
+    print(f"{task.label}: đang chờ {len(paths)} ảnh tải xong hoàn toàn...", flush=True)
+    wait_for_upload(page, paths, upload_timeout)
+    print(f"{task.label}: đã thấy đủ {len(paths)} ảnh, không còn báo đang tải.", flush=True)
+    if attach_only:
+        print(f"{task.label}: ảnh đang đính kèm, chưa gửi. Giữ ảnh gốc; đóng tab khi thao tác xong.", flush=True)
+        keep_tabs_open([page])
+        return
+    send_prompt(page, prompt, paths, upload_timeout)
+    print(f"{task.label}: đã gửi ảnh; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
+    parts = wait_for_parts(page, prompt, response_timeout)
+    verify_saved_upload(page, prompt, paths, upload_timeout)
+    check_stop()
+    write_parts(parts, task.output)
+    print(f"{task.label}: đã lưu đủ 10 file .txt tại: {task.output.resolve()}", flush=True)
+    print(f"{task.label}: đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}", flush=True)
+    if not keep_images and delete_uploaded(task.images):
+        raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
+    print(f"Đã hoàn tất {task.label}.", flush=True)
+
+
+def _validate_task(task: UploadTask, attach_only: bool):
+    if not 1 <= len(task.images) <= 10:
+        raise GeminiBrowserError(f"{task.label}: mỗi bài cần từ 1 đến 10 ảnh trong cùng một chat.")
+    if not attach_only:
+        validate_output(task.output)
+
+
+def _parallel_worker(task: UploadTask, port: int, cancellation: Event, options: dict):
+    with cancellation_scope(cancellation):
+        check_stop()
+        _validate_task(task, options["attach_only"])
+        with browser_context(port) as context:
+            # Never reuse a shared/restored tab: each worker owns this new page.
+            page = context.new_page()
+            _process_task(task, page, **options)
+
+
+def _parallel_upload(tasks: list[UploadTask], *, profile: Path, workers: int, options: dict):
+    cancellation = Event()
+    failures = []
+    with logged_in_browser(profile, options["login_timeout"]) as port:
+        print(f"Đã mở phiên Chrome/Edge; chạy song song tối đa {min(workers, len(tasks))} bài trên các tab riêng.", flush=True)
+        executor = ThreadPoolExecutor(max_workers=min(workers, len(tasks)), thread_name_prefix="gemini")
+        futures = {}
+        try:
+            for task in tasks:
+                check_stop()
+                futures[executor.submit(_parallel_worker, task, port, cancellation, options)] = task
+            pending = set(futures)
+            finished = 0
+            while pending:
+                check_stop()
+                done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+                for future in done:
+                    task = futures[future]
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        failures.append(f"{task.label}: {exc}")
+                        print(f"{task.label}: lỗi; giữ ảnh chưa hoàn tất. Các bài khác tiếp tục. {exc}",
+                              file=sys.stderr, flush=True)
+                    finished += 1
+                    print(f"Đã kết thúc {finished}/{len(tasks)} bài; {len(failures)} bài lỗi.", flush=True)
+        finally:
+            # Ctrl+C also reaches here. Wake every polling UI/file wait before
+            # joining workers; cleanup must not remove files still in use.
+            cancellation.set()
+            for future in futures:
+                future.cancel()
+            executor.shutdown(wait=True, cancel_futures=True)
+    if failures:
+        raise GeminiBrowserError("Các bài khác đã kết thúc; giữ kết quả thành công.\n" + "\n".join(failures))
+
+
 def upload_images(images: list[PreparedImage], *, profile: Path,
                   login_timeout: float, upload_timeout: float,
                   batch_size: int, prompt: str, keep_images: bool = False,
                   attach_only: bool = False, output: Path | None = None,
-                  response_timeout: float = 600):
+                  response_timeout: float = 600, workers: int = 1):
     output = output or Path(__file__).resolve().parent.parent / "problem"
     count = (len(images) + batch_size - 1) // batch_size
     destinations = output_destinations(output, count)
@@ -484,64 +583,48 @@ def upload_images(images: list[PreparedImage], *, profile: Path,
              for index, start in enumerate(range(0, len(images), batch_size))]
     upload_tasks(tasks, profile=profile, login_timeout=login_timeout, upload_timeout=upload_timeout,
                  prompt=prompt, keep_images=keep_images, attach_only=attach_only,
-                 response_timeout=response_timeout)
+                 response_timeout=response_timeout, workers=workers)
 
 
 def upload_tasks(tasks: list[UploadTask], *, profile: Path,
                  login_timeout: float, upload_timeout: float,
                  prompt: str, keep_images: bool = False, attach_only: bool = False,
-                 response_timeout: float = 600):
-    """Finish one whole problem, including export, before opening the next chat."""
+                 response_timeout: float = 600, workers: int = 1):
+    """Run independent problems in separate tabs; preserve each output mapping."""
     from playwright.sync_api import Error as PlaywrightError
 
     if not tasks:
         return
+    if not 1 <= workers <= 10:
+        raise ValueError("Số bài chạy song song phải từ 1 đến 10.")
+    if not attach_only:
+        outputs = [task.output.resolve() for task in tasks]
+        for index, output in enumerate(outputs):
+            if any(output == other or output in other.parents or other in output.parents
+                   for other in outputs[index + 1:]):
+                raise ValueError("Mỗi bài phải có thư mục kết quả riêng, không trùng hoặc lồng nhau.")
+    options = dict(login_timeout=login_timeout, upload_timeout=upload_timeout, prompt=prompt,
+                   keep_images=keep_images, attach_only=attach_only, response_timeout=response_timeout)
+    if workers > 1 and len(tasks) > 1:
+        _parallel_upload(tasks, profile=profile, workers=workers, options=options)
+        return
     for task in tasks:
-        if not 1 <= len(task.images) <= 10:
-            raise GeminiBrowserError(f"{task.label}: mỗi bài cần từ 1 đến 10 ảnh trong cùng một chat.")
-        if not attach_only:
-            validate_output(task.output)
+        _validate_task(task, attach_only)
     pages = []
     try:
         with open_browser(profile, login_timeout) as context:
             print("Đã kết nối Chrome/Edge sau bước đăng nhập Gemini.")
             print(f"Phiên đăng nhập lưu trong {profile.resolve()}.")
             try:
-                for index, task in enumerate(tasks, 1):
+                for task in tasks:
                     check_stop()
-                    batch = task.images
-                    print(f"[{index}/{len(tasks)}] Bắt đầu {task.label}: {len(batch)} ảnh.", flush=True)
                     # Reuse the launcher's empty tab, preserving any restored chats.
                     if not pages and context.pages and context.pages[0].url == "about:blank":
                         page = context.pages[0]
                     else:
                         page = context.new_page()
                     pages.append(page)
-                    new_chat(page, login_timeout)
-                    pause_after_action(page)
-                    paths = [item.upload for item in batch]
-                    choose_files(page, paths)
-                    print(f"{task.label}: đang chờ {len(batch)} ảnh tải xong hoàn toàn...", flush=True)
-                    wait_for_upload(page, paths, upload_timeout)
-                    print(f"{task.label}: đã thấy đủ {len(batch)} ảnh, không còn báo đang tải.")
-                    if not attach_only:
-                        send_prompt(page, prompt, paths, upload_timeout)
-                        print(f"{task.label}: đã gửi ảnh; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
-                        parts = wait_for_parts(page, prompt, response_timeout)
-                        verify_saved_upload(page, prompt, paths, upload_timeout)
-                        check_stop()
-                        destination = task.output
-                        write_parts(parts, destination)
-                        print(f"Đã lưu đủ 10 file .txt tại: {destination.resolve()}", flush=True)
-                        print(f"Đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}")
-                        if not keep_images:
-                            retained = delete_uploaded(batch)
-                            if retained:
-                                raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
-                        print(f"Đã hoàn tất {task.label}.", flush=True)
-                    else:
-                        print("Ảnh đang đính kèm, chưa gửi. Giữ nguyên toàn bộ ảnh gốc; đóng tab này để tiếp tục bài kế tiếp.")
-                        keep_tabs_open([page])
+                    _process_task(task, page, **options)
             except Exception:
                 print("Đã dừng lần chạy lỗi; giữ ảnh chưa xác nhận và đóng phiên trình duyệt này.", file=sys.stderr)
                 raise
