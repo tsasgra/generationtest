@@ -1,3 +1,4 @@
+.env
 .env.*
 __pycache__/
 *.py[cod]
@@ -13,3 +14,17 @@ work/
 *.log
 tests/
 examples/
+.venv-gemini/
+.gemini-browser*/
+.gemini-runtime/
+.gemini-stop-request
+.gemini-*.lock
+.pipeline*.lock
+.pipeline-state/
+batch_state/
+polygon_results/
+report.txt
+report.txt.tmp
+img/
+problem/
+.gemini-export-*/

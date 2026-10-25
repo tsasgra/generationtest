@@ -1,2 +1,2 @@
-# Core CLI uses only the Python standard library (Python 3.10+).
-# Optional browser URL fallback: pip install -r requirements-browser.txt
+# Full image -> Gemini -> Polygon pipeline (Python 3.10+).
+-r requirements-gemini.txt

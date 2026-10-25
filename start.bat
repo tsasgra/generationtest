@@ -1,4 +1,4 @@
 @echo off
 setlocal DisableDelayedExpansion
-call "%~dp0polygon_tool\launch_windows.cmd" auto
+call "%~dp0launch_pipeline.cmd" run %*
 exit /b %errorlevel%
