@@ -4,13 +4,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import io
+import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import sys
+import tempfile
 import warnings
 
 from .control import check_stop
+from .state import ordinary_directory
 
 
 class ImageInputError(ValueError):
@@ -158,39 +162,97 @@ def prepare_images(files: list[Path], destination: Path,
     return prepared
 
 
-def delete_uploaded(images: list[PreparedImage]) -> list[str]:
-    """Called only for a batch observed in a saved chat after reloading it.
+def _file_digest(path: Path) -> str:
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ImageInputError(f"Không dùng ảnh qua liên kết hoặc file đặc biệt: {path.name}")
+    result = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            check_stop()
+            result.update(block)
+    return result.hexdigest()
 
-    Never glob the input directory here: later files and changed sources do not
-    belong to the confirmed upload. Check identity and bytes just before unlink.
+
+def _archive_directory(path: Path) -> None:
+    for parent in (path, *path.parents):
+        if parent.is_symlink() or (parent.exists() and not ordinary_directory(parent)):
+            raise ImageInputError(f"Thư mục lưu ảnh phải là thư mục thật: {parent}")
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _archive_copy(source: Path, destination: Path, expected_digest: str | None = None) -> Path:
+    """Publish a verified copy without ever replacing a previous archive."""
+    _archive_directory(destination)
+    with tempfile.TemporaryDirectory(prefix=".archive-", dir=destination) as directory:
+        temporary = Path(directory) / "copy"
+        copied = snapshot_source(source, temporary)
+        if expected_digest is not None and copied.digest != expected_digest:
+            raise ImageInputError("nội dung ảnh đã thay đổi sau khi chuẩn bị tải")
+        if _file_digest(temporary) != copied.digest:
+            raise ImageInputError("không xác nhận được bản sao ảnh")
+        number = 1
+        while True:
+            check_stop()
+            name = source.name if number == 1 else f"{source.stem} ({number}){source.suffix}"
+            target = destination / name
+            if target.exists() or target.is_symlink():
+                if target.is_file() and not target.is_symlink() and _file_digest(target) == copied.digest:
+                    return target
+                number += 1
+                continue
+            try:
+                # Exclusive creation also protects against another copy winning
+                # the filename after the existence check above.
+                with target.open("xb") as output, temporary.open("rb") as incoming:
+                    shutil.copyfileobj(incoming, output)
+                    output.flush()
+                    os.fsync(output.fileno())
+            except FileExistsError:
+                number += 1
+                continue
+            if _file_digest(target) != copied.digest:
+                raise ImageInputError(f"không xác nhận được bản lưu {target.name}; giữ ảnh gốc")
+            return target
+
+
+def archive_uploaded(images: list[PreparedImage], destination: Path, *, save_uploads: bool = True) -> list[str]:
+    """Move confirmed originals into the matching problem's img directory.
+
+    Source bytes and identity must still match the prepared upload. The source
+    is removed only after both the archived original and (when named differently)
+    Gemini's actual PNG are verified. Earlier archives are never overwritten.
     """
     kept = []
     for item in images:
         check_stop()
         try:
             if not item.complete:
-                raise ImageInputError("chỉ tải khung/trang đầu, cần giữ bản gốc nhiều khung/trang")
+                raise ImageInputError("chỉ tải khung/trang đầu, giữ nguyên bản gốc nhiều khung/trang")
             if item.snapshot is None:
                 raise ImageInputError("thiếu thông tin đối chiếu ảnh gốc")
-            info = item.source.lstat()
             snapshot = item.snapshot
             expected = (snapshot.device, snapshot.inode, snapshot.size, snapshot.modified_ns)
+            info = item.source.lstat()
             if not stat.S_ISREG(info.st_mode) or _identity(info) != expected:
                 raise ImageInputError("file đã thay đổi sau khi chuẩn bị tải")
-            digest = hashlib.sha256()
-            with item.source.open("rb") as stream:
-                for block in iter(lambda: stream.read(1024 * 1024), b""):
-                    digest.update(block)
+            target = _archive_copy(item.source, Path(destination), snapshot.digest)
+            if target.resolve() == item.source.resolve():
+                raise ImageInputError("ảnh đã nằm trong thư mục lưu; không xóa cùng đường dẫn")
+            if save_uploads and item.upload.name != item.source.name:
+                uploaded = _archive_copy(item.upload, Path(destination) / "uploaded")
+                print(f"Đã giữ PNG gửi Gemini: {uploaded}", flush=True)
+            # Recheck both copies just before removing the original path. A
+            # user edit during copying must remain in the input directory.
+            if _file_digest(target) != snapshot.digest or _file_digest(item.source) != snapshot.digest:
+                raise ImageInputError("nội dung ảnh đã thay đổi trong lúc lưu; giữ ảnh gốc")
             latest = item.source.lstat()
-            if (digest.hexdigest() != snapshot.digest or _identity(latest) != expected
-                    or not stat.S_ISREG(latest.st_mode)):
-                raise ImageInputError("nội dung file đã thay đổi sau khi chuẩn bị tải")
+            if not stat.S_ISREG(latest.st_mode) or _identity(latest) != expected:
+                raise ImageInputError("file đã thay đổi trong lúc lưu; giữ ảnh gốc")
             item.source.unlink()
-            print(f"Đã xóa ảnh đã gửi: {item.source.name}")
-        except FileNotFoundError:
-            print(f"Ảnh đã được di chuyển/xóa trước đó: {item.source.name}")
+            print(f"Đã chuyển ảnh đã gửi: {item.source.name} → {target}", flush=True)
         except (OSError, ImageInputError) as exc:
-            message = f"Giữ lại {item.source.name}: {exc}."
+            message = f"Chưa chuyển {item.source.name}: {exc}."
             kept.append(message)
             print(message, file=sys.stderr)
     return kept

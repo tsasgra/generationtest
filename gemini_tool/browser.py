@@ -12,7 +12,7 @@ from threading import Event
 from urllib.parse import urlencode, urlsplit
 
 from .control import cancellation_scope, check_stop, exclusive_lock
-from .images import PreparedImage, delete_uploaded
+from .images import PreparedImage, archive_uploaded
 from .native import close_native_browser, start_native_browser, wait_for_manual_login
 from .parts import output_destinations, validate_output, wait_for_parts, write_parts
 
@@ -69,7 +69,7 @@ def logged_in_browser(profile: Path, login_timeout: float):
             port, session_file, old_tabs = start_native_browser(login_url, profile)
             wait_for_manual_login(port, old_tabs, timeout=login_timeout)
         except (OSError, ValueError) as exc:
-            raise GeminiBrowserError(f"{exc}\nChưa tải hoặc xóa ảnh của lần chạy này.") from exc
+            raise GeminiBrowserError(f"{exc}\nChưa tải hoặc chuyển ảnh của lần chạy này.") from exc
         try:
             yield port
         finally:
@@ -89,7 +89,7 @@ def browser_context(port: int):
             check_stop()
             raise GeminiBrowserError(
                 "Không kết nối được Chrome/Edge vừa đăng nhập. Đóng cửa sổ của script rồi chạy lại. "
-                "Chưa tải hoặc xóa ảnh."
+                "Chưa tải hoặc chuyển ảnh."
             ) from exc
         if not browser.contexts:
             raise GeminiBrowserError("Không tìm thấy phiên Chrome/Edge vừa đăng nhập; ảnh được giữ nguyên.")
@@ -118,7 +118,7 @@ def wait_for_editor(page, timeout: float):
             if location.hostname == "accounts.google.com" and "/signin/rejected" in location.path:
                 raise GeminiBrowserError(
                     "Google đã từ chối đăng nhập trong Chrome/Edge. "
-                    "Chưa tải hoặc xóa ảnh của nhóm này. Giữ cửa sổ để bạn kiểm tra thông báo của Google."
+                    "Chưa tải hoặc chuyển ảnh của nhóm này. Giữ cửa sổ để bạn kiểm tra thông báo của Google."
                 )
             if urlsplit(page.url).hostname == "gemini.google.com":
                 editor = page.locator(EDITOR).first
@@ -284,7 +284,7 @@ def choose_files(page, paths: list[Path], timeout: float = 15):
                 ))) is not None:
                     raise GeminiBrowserError(
                         "Gemini yêu cầu đăng nhập Google để tải tệp. "
-                        "Hãy đăng nhập trong cửa sổ của script rồi chạy lại; chưa tải, gửi hoặc xóa ảnh."
+                        "Hãy đăng nhập trong cửa sổ của script rồi chạy lại; chưa tải, gửi hoặc chuyển ảnh."
                     )
                 if not opened_menu:
                     composer = _composer(page)
@@ -512,8 +512,8 @@ def _process_task(task: UploadTask, page, *, login_timeout: float, upload_timeou
     write_parts(parts, task.output)
     print(f"{task.label}: đã lưu đủ 10 file .txt tại: {task.output.resolve()}", flush=True)
     print(f"{task.label}: đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}", flush=True)
-    if not keep_images and delete_uploaded(task.images):
-        raise GeminiBrowserError("Ảnh đã gửi nhưng một số bản gốc được giữ lại; xem lý do phía trên.")
+    if not keep_images and archive_uploaded(task.images, task.output / "img"):
+        raise GeminiBrowserError("Ảnh đã gửi nhưng chưa chuyển được đủ ảnh vào problem/img; xem lý do phía trên.")
     print(f"Đã hoàn tất {task.label}.", flush=True)
 
 

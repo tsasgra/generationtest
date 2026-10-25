@@ -70,11 +70,12 @@ def validate_output(output: Path) -> None:
             raise ValueError("Thư mục problem không được nằm qua liên kết hoặc đường dẫn không phải thư mục.")
     if output.is_symlink() or (output.exists() and not ordinary_directory(output)):
         raise ValueError("Đầu ra problem phải là thư mục riêng, không phải liên kết.")
-    if output.exists() and any(
-        path.name not in PART_FILES.values() or not path.is_file() or path.is_symlink()
-        for path in output.iterdir()
-    ):
-        raise ValueError(f"Chỉ thay bộ 10 file chuẩn; có file/thư mục lạ trong {output}.")
+    if output.exists():
+        for path in output.iterdir():
+            if path.name == "img" and ordinary_directory(path):
+                continue
+            if path.name not in PART_FILES.values() or not path.is_file() or path.is_symlink():
+                raise ValueError(f"Chỉ thay bộ 10 file chuẩn và giữ img/; có file/thư mục lạ trong {output}.")
 
 
 def write_parts(parts: dict[str, str], output: Path) -> None:
@@ -98,6 +99,12 @@ def write_parts(parts: dict[str, str], output: Path) -> None:
             target.write_bytes(payload)
             if target.read_bytes() != payload:
                 raise OSError(f"Không xác nhận được file đầu ra {filename}.")
+        archive = output / "img"
+        if archive.exists():
+            # Copy the archive before swapping the complete problem directory.
+            # Never move the only surviving images into a temporary location:
+            # a failed write or forced stop must leave the old copy intact.
+            shutil.copytree(archive, staging / "img", symlinks=True)
         check_stop()
         validate_output(output)
         if output.exists():

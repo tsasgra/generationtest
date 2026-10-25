@@ -102,7 +102,7 @@ def execute(args, *, root: Path = ROOT) -> int:
             print(f"Bước 1–2: gửi ảnh và nhận 10 phần; tối đa {args.workers} bài Gemini song song.", flush=True)
             upload_tasks(tasks, profile=args.profile, login_timeout=args.login_timeout,
                          upload_timeout=args.upload_timeout, response_timeout=args.response_timeout,
-                         prompt=args.prompt, keep_images=True, workers=args.workers)
+                         prompt=args.prompt, keep_images=False, workers=args.workers)
         check_stop()
         # Only this run's full set may enter the Polygon stage. Start already
         # removed all old text files, so stale successful output cannot leak in.

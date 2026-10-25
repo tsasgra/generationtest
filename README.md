@@ -15,7 +15,7 @@ Cài Python 3.10 trở lên và Chrome hoặc Edge trên Windows. Lần đầu c
 | … | … | … |
 | `img/img10/` | `problem/problem10/` | Bài 10 trong `report.txt` |
 
-Mỗi thư mục ảnh chứa từ 1 đến 10 ảnh của **cùng một bài**. Cả 10 thư mục phải có ảnh hợp lệ. Nếu một bài có nhiều trang, lưu mỗi trang thành một ảnh riêng và đặt tên theo thứ tự. Luồng chung giữ nguyên ảnh gốc. Chạy `python pipeline.py init` để tạo các thư mục trống nếu chưa có.
+Mỗi thư mục ảnh chứa từ 1 đến 10 ảnh của **cùng một bài**. Cả 10 thư mục phải có ảnh hợp lệ. Nếu một bài có nhiều trang, lưu mỗi trang thành một ảnh riêng và đặt tên theo thứ tự. Sau khi xác nhận ảnh đã gửi và đã lưu đủ 10 phần, công cụ chuyển ảnh gốc của bài đó từ `img/imgN/` sang `problem/problemN/img/`. Ảnh chưa gửi thành công vẫn ở thư mục nguồn. Chạy `python pipeline.py init` để tạo các thư mục trống nếu chưa có.
 
 Cấu hình hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong file `.env` cạnh script, hoặc trong biến môi trường. `.env`, ảnh, nội dung đề, checkpoint và kết quả chỉ lưu trên máy, không được đưa lên Git. Giá trị trong `.env` được đọc như văn bản, không thực thi như lệnh shell.
 
@@ -28,11 +28,15 @@ Cấu hình hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong file `.e
 | `start_resume.bat` | Tiếp tục giai đoạn Polygon đã có checkpoint; không gửi lại ảnh và không xóa đầu vào. |
 | `stop.bat` | Dừng các tiến trình thuộc luồng chạy. |
 
-Start dọn checkpoint mặc định, dữ liệu tạm, kết quả Polygon và `report.txt` cũ. Ảnh gốc, `.env`, thư viện đã cài và phiên đăng nhập Google được giữ lại. Start không xóa bài hoặc cuộc trò chuyện đã tạo trên máy chủ. Sau khi reset, đây là lượt tạo mới: nếu tên định danh đã tồn tại trên Polygon, cần dùng tên mới hoặc dùng Resume để tiếp tục lượt cũ trước khi bấm Start.
+Start dọn checkpoint mặc định, dữ liệu tạm, kết quả Polygon và `report.txt` cũ. Ảnh trong cả thư mục nguồn lẫn `problem/problemN/img/`, `.env`, thư viện đã cài và phiên đăng nhập Google được giữ lại. Start không xóa bài hoặc cuộc trò chuyện đã tạo trên máy chủ. Sau khi reset, đây là lượt tạo mới: nếu tên định danh đã tồn tại trên Polygon, cần dùng tên mới hoặc dùng Resume để tiếp tục lượt cũ trước khi bấm Start. Muốn gửi lại ảnh đã chuyển, chép chúng từ `problem/problemN/img/` về `img/imgN/` trước khi Start; công cụ không tự gửi lại ảnh cũ trong kho lưu.
 
 Mỗi bài phải trả về đủ một bộ 10 phần, gồm `name problem.txt`, `name.txt`, `lengend.txt`, `input.txt`, `output.txt`, `note.txt`, `checker.txt`, `gen.txt`, `script_sinh_test.txt`, `solution.txt`. `note.txt` được phép rỗng. Tên định danh chỉ gồm chữ thường ASCII, chữ số và dấu `-`; cả 10 bài phải có tên khác nhau.
 
 Nếu Gemini lỗi hoặc thiếu phần, luồng dừng trước khi tạo bài trên Polygon. Sau khi đủ cả 10 bộ hợp lệ, các tác vụ Polygon chạy song song với checkpoint riêng cho mỗi bài. Khi một bài lỗi, công cụ ghi rõ tình trạng trong báo cáo và giữ kết quả của những bài đã thành công; không báo đủ 10 link khi chưa hoàn tất.
+
+Nếu `input`, `output`, `note`, `name` hoặc `legend`/`lengend` có tham chiếu ảnh, ví dụ `\includegraphics{hinh.png}`, công cụ vẫn tải nội dung lên như bình thường và thêm dòng **`problemN thiếu ảnh`** ở cuối `report.txt` cho từng bài liên quan. Cảnh báo được giữ cả khi một bài chưa tạo package thành công và khi Resume. Công cụ không tự tải ảnh vào **Statement Resource Files** của Polygon; bạn dùng ảnh trong `problem/problemN/img/` để bổ sung thủ công, với tên file khớp đường dẫn trong statement.
+
+Nếu tên PNG gửi cho Gemini khác tên ảnh gốc, bản PNG đó được giữ thêm trong `problem/problemN/img/uploaded/`. Khi statement tham chiếu tên dạng `0001_...png`, dùng bản trong `uploaded/`. Ảnh lưu từ lượt cũ không bị ghi đè; nếu trùng tên nhưng khác nội dung, bản mới được thêm hậu tố và đường dẫn được in ra khi chạy.
 
 ## Chạy bằng dòng lệnh
 
