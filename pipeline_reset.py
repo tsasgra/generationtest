@@ -78,13 +78,14 @@ def _check_owned_locks(root: Path) -> None:
 
 
 def _clear_outputs(root: Path, problem_dirs: list[Path], legacy: list[Path]) -> None:
+    problem_root = root / "problem"
+    if problem_root.exists():
+        # Start owns this entire generated-output tree, including archived
+        # images and remnants of an interrupted export. Never follow links.
+        for path in problem_root.iterdir():
+            remove_state(path)
     for directory in problem_dirs:
-        if directory.exists():
-            for path in directory.iterdir():
-                if path.suffix.casefold() == ".txt" and (path.is_file() or path.is_symlink()):
-                    # unlink removes a link itself, never its target; nested
-                    # directories and every non-text file are preserved.
-                    path.unlink()
+        directory.mkdir(parents=True, exist_ok=True)
     for path in legacy:
         path.unlink(missing_ok=True)
         path.with_name(path.name + ".tmp").unlink(missing_ok=True)
@@ -124,11 +125,11 @@ def fresh_run(root: Path, problem_dirs: list[Path], profile: Path):
             with ExitStack() as profile_locks:
                 for candidate in sorted(profiles):
                     profile_locks.enter_context(exclusive_lock(candidate / ".gemini-profile.lock"))
-                print("Đang xóa checkpoint, kết quả cũ và các file .txt trong 10 thư mục problem...", flush=True)
+                print("Đang xóa checkpoint, kết quả cũ và toàn bộ dữ liệu trong problem, kể cả img...", flush=True)
                 # Only orphan connections can remain: active uploaders own the
                 # launch/upload locks above. Preserve the native login profile.
                 reset_run(root, [profile], stop_processes=False)
                 _clear_outputs(root, problem_dirs, legacy)
             (root / ".gemini-stop-request").unlink(missing_ok=True)
-        print("Đã dọn lượt cũ; bắt đầu lượt mới. Ảnh gốc và đăng nhập được giữ lại.", flush=True)
+        print("Đã dọn problem và checkpoint; bắt đầu lượt mới. Ảnh đầu vào trong img/ và đăng nhập được giữ lại.", flush=True)
         yield

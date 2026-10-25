@@ -105,7 +105,7 @@ def execute(args, *, root: Path = ROOT) -> int:
                          prompt=args.prompt, keep_images=False, workers=args.workers)
         check_stop()
         # Only this run's full set may enter the Polygon stage. Start already
-        # removed all old text files, so stale successful output cannot leak in.
+        # removed all old problem data, so stale output cannot leak in.
         for directory in problem_dirs:
             parse_problem(directory)
         print(f"Bước 3: tải 10 bài lên Polygon, tối đa {args.polygon_workers} bài song song.", flush=True)
@@ -124,7 +124,7 @@ def execute(args, *, root: Path = ROOT) -> int:
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("command", choices=("run", "check", "init"), nargs="?", default="run",
-                     help="run: xóa checkpoint và .txt cũ rồi chạy mới; check: kiểm tra ảnh offline.")
+                     help="run: xóa checkpoint và toàn bộ dữ liệu problem rồi chạy mới; check: kiểm tra ảnh offline.")
     cli.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-native")
     cli.add_argument("--workers", type=int, choices=range(1, 11), default=10)
     cli.add_argument("--polygon-workers", type=int, choices=range(1, 11), default=10)

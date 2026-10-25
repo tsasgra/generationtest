@@ -23,12 +23,12 @@ Cấu hình hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong file `.e
 
 | File | Hành vi |
 | --- | --- |
-| **`start.bat`** | Xóa trạng thái lần trước và toàn bộ file `.txt` trực tiếp trong `problem/problem1`…`problem/problem10`, rồi bắt đầu lượt mới từ ảnh. |
+| **`start.bat`** | Xóa checkpoint và toàn bộ dữ liệu trong `problem/`, kể cả `img/` của từng bài, rồi tạo lại 10 thư mục problem trống và bắt đầu lượt mới. |
 | `start_check.bat` | Kiểm tra đủ 10 bộ ảnh, không xóa nội dung cũ và không gọi Gemini/Polygon. |
 | `start_resume.bat` | Tiếp tục giai đoạn Polygon đã có checkpoint; không gửi lại ảnh và không xóa đầu vào. |
 | `stop.bat` | Dừng các tiến trình thuộc luồng chạy. |
 
-Start dọn checkpoint mặc định, dữ liệu tạm, kết quả Polygon và `report.txt` cũ. Ảnh trong cả thư mục nguồn lẫn `problem/problemN/img/`, `.env`, thư viện đã cài và phiên đăng nhập Google được giữ lại. Start không xóa bài hoặc cuộc trò chuyện đã tạo trên máy chủ. Sau khi reset, đây là lượt tạo mới: nếu tên định danh đã tồn tại trên Polygon, cần dùng tên mới hoặc dùng Resume để tiếp tục lượt cũ trước khi bấm Start. Muốn gửi lại ảnh đã chuyển, chép chúng từ `problem/problemN/img/` về `img/imgN/` trước khi Start; công cụ không tự gửi lại ảnh cũ trong kho lưu.
+Start dọn checkpoint mặc định, dữ liệu tạm, kết quả Polygon, `report.txt` cũ và **toàn bộ nội dung `problem/`**: file `.txt`, ảnh đã lưu, `img/uploaded/`, thư mục con và dữ liệu còn sót lại. Sau đó chỉ còn 10 thư mục `problem/problem1`…`problem/problem10` trống để nhận kết quả mới. Ảnh đầu vào trong `img/imgN/`, `.env`, thư viện đã cài và phiên đăng nhập Google được giữ lại. Start không xóa bài hoặc cuộc trò chuyện đã tạo trên máy chủ. Muốn gửi lại ảnh đã chuyển, chép chúng từ `problem/problemN/img/` về `img/imgN/` **trước khi Start**. Nếu muốn tiếp tục cùng các bài Polygon và giữ dữ liệu của lượt hiện tại, dùng Resume.
 
 Mỗi bài phải trả về đủ một bộ 10 phần, gồm `name problem.txt`, `name.txt`, `lengend.txt`, `input.txt`, `output.txt`, `note.txt`, `checker.txt`, `gen.txt`, `script_sinh_test.txt`, `solution.txt`. `note.txt` được phép rỗng. Tên định danh chỉ gồm chữ thường ASCII, chữ số và dấu `-`; cả 10 bài phải có tên khác nhau.
 
@@ -36,7 +36,7 @@ Nếu Gemini lỗi hoặc thiếu phần, luồng dừng trước khi tạo bài
 
 Nếu `input`, `output`, `note`, `name` hoặc `legend`/`lengend` có tham chiếu ảnh, ví dụ `\includegraphics{hinh.png}`, công cụ vẫn tải nội dung lên như bình thường và thêm dòng **`problemN thiếu ảnh`** ở cuối `report.txt` cho từng bài liên quan. Cảnh báo được giữ cả khi một bài chưa tạo package thành công và khi Resume. Công cụ không tự tải ảnh vào **Statement Resource Files** của Polygon; bạn dùng ảnh trong `problem/problemN/img/` để bổ sung thủ công, với tên file khớp đường dẫn trong statement.
 
-Nếu tên PNG gửi cho Gemini khác tên ảnh gốc, bản PNG đó được giữ thêm trong `problem/problemN/img/uploaded/`. Khi statement tham chiếu tên dạng `0001_...png`, dùng bản trong `uploaded/`. Ảnh lưu từ lượt cũ không bị ghi đè; nếu trùng tên nhưng khác nội dung, bản mới được thêm hậu tố và đường dẫn được in ra khi chạy.
+Nếu tên PNG gửi cho Gemini khác tên ảnh gốc, bản PNG đó được giữ thêm trong `problem/problemN/img/uploaded/`. Khi statement tham chiếu tên dạng `0001_...png`, dùng bản trong `uploaded/` trước lượt Start tiếp theo. Khi chạy riêng giai đoạn Gemini mà không reset, ảnh trùng tên nhưng khác nội dung được thêm hậu tố để không ghi đè.
 
 ## Chạy bằng dòng lệnh
 
