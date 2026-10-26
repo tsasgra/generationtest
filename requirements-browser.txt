@@ -1,0 +1,2 @@
+# Optional browser fallback for the standalone Polygon CLI.
+playwright>=1.48,<2

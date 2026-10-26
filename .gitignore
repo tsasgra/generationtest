@@ -1,5 +1,6 @@
 .env
 .env.*
+!.env.example
 __pycache__/
 *.py[cod]
 .venv/
@@ -27,3 +28,10 @@ report.txt.tmp
 img/
 problem/
 .gemini-export-*/
+
+# Standalone Polygon batch checkpoints/results.
+run_state*.problems/
+results/
+result.json.tmp
+/img[1-9]/
+/img10/

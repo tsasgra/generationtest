@@ -44,6 +44,16 @@ def init_directory(path: str | Path) -> None:
         (directory / filename).touch(exist_ok=False)
 
 
+def init_batch(path: str | Path, count: int = MAX_PROBLEMS) -> None:
+    """Create the standalone uploader's numbered templates without overwriting."""
+    if not 1 <= count <= MAX_PROBLEMS:
+        raise ValueError('Số bài phải từ 1 đến 10.')
+    directory = Path(path)
+    directory.mkdir(parents=True, exist_ok=False)
+    for number in range(1, count + 1):
+        init_directory(directory / f'problem{number}')
+
+
 def numbered_directories(path: str | Path, prefix: str) -> dict[int, Path]:
     """Read imgN/problemN (also img(N)/problem(N)) in numeric order."""
     directory = Path(path)
@@ -66,16 +76,38 @@ def numbered_directories(path: str | Path, prefix: str) -> dict[int, Path]:
     return dict(sorted(numbered.items()))
 
 
-def discover_problems(path: str | Path) -> list[Path]:
-    """Ignore empty slots; partial ten-part sets must still fail preflight."""
+def is_blank_template(folder: Path) -> bool:
+    """Only the exact, entirely blank ten-file scaffold counts as unused."""
+    entries = {entry.name: entry for entry in folder.iterdir()
+               if entry.name != 'img' and not entry.name.startswith('.')}
+    expected = set(PART_FILES.values())
+    if 'legend.txt' in entries:
+        expected.remove('lengend.txt')
+        expected.add('legend.txt')
+    if set(entries) != expected:
+        return False
+    try:
+        return all(path.is_file() and not path.is_symlink() and
+                   not path.read_bytes().decode('utf-8-sig').strip() for path in entries.values())
+    except UnicodeError:
+        return False
+
+
+def discover_problems(path: str | Path, *, allow_single: bool = False) -> list[Path] | None:
+    """Ignore empty/blank template slots; partial sets still fail preflight."""
     directory = Path(path)
+    if allow_single and not directory.is_dir():
+        return None
     numbered = numbered_directories(directory, 'problem')
     if not numbered:
+        if allow_single:
+            return None
         raise ValueError(f'Không tìm thấy thư mục problem1…problem10 trong {directory}.')
     if any(entry.suffix.lower() == '.txt' for entry in directory.iterdir()):
         raise ValueError('Không đặt file .txt trực tiếp trong thư mục chứa nhiều bài; chuyển vào problem1, problem2, ...')
     return [folder.resolve() for folder in numbered.values()
-            if any(entry.name != 'img' and not entry.name.startswith('.') for entry in folder.iterdir())]
+            if any(entry.name != 'img' and not entry.name.startswith('.') for entry in folder.iterdir())
+            and not is_blank_template(folder)]
 
 
 def parse_batch(paths: list[Path]) -> list[dict[str, str]]:

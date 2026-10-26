@@ -51,12 +51,12 @@ def _validate(root: Path, problem_dirs: list[Path], profile: Path) -> None:
 
 def _legacy_states(root: Path) -> list[Path]:
     states = {root / "run_state.json"}
-    for path in root.glob("run_state*.json*"):
+    for path in (*root.glob("run_state*.json*"), *root.glob("run_state*.problems/*.json*")):
         name = path.name
         if name.endswith(".lock") or name.endswith(".tmp"):
             name = name.rsplit(".", 1)[0]
         if name.endswith(".json"):
-            states.add(root / name)
+            states.add(path.with_name(name))
     for path in states:
         for candidate in (path, path.with_name(path.name + ".tmp"), path.with_name(path.name + ".lock")):
             _ordinary_path(candidate, directory=False)

@@ -256,3 +256,41 @@ def archive_uploaded(images: list[PreparedImage], destination: Path, *, save_upl
             kept.append(message)
             print(message, file=sys.stderr)
     return kept
+
+
+def delete_uploaded(images: list[PreparedImage]) -> list[str]:
+    """Called only for a batch observed in a saved chat after reloading it.
+
+    Never glob the input directory here: later files and changed sources do not
+    belong to the confirmed upload. Check identity and bytes just before unlink.
+    """
+    kept = []
+    for item in images:
+        check_stop()
+        try:
+            if not item.complete:
+                raise ImageInputError("chỉ tải khung/trang đầu, cần giữ bản gốc nhiều khung/trang")
+            if item.snapshot is None:
+                raise ImageInputError("thiếu thông tin đối chiếu ảnh gốc")
+            info = item.source.lstat()
+            snapshot = item.snapshot
+            expected = (snapshot.device, snapshot.inode, snapshot.size, snapshot.modified_ns)
+            if not stat.S_ISREG(info.st_mode) or _identity(info) != expected:
+                raise ImageInputError("file đã thay đổi sau khi chuẩn bị tải")
+            digest = hashlib.sha256()
+            with item.source.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+            latest = item.source.lstat()
+            if (digest.hexdigest() != snapshot.digest or _identity(latest) != expected
+                    or not stat.S_ISREG(latest.st_mode)):
+                raise ImageInputError("nội dung file đã thay đổi sau khi chuẩn bị tải")
+            item.source.unlink()
+            print(f"Đã xóa ảnh đã gửi: {item.source.name}")
+        except FileNotFoundError:
+            print(f"Ảnh đã được di chuyển/xóa trước đó: {item.source.name}")
+        except (OSError, ImageInputError) as exc:
+            message = f"Giữ lại {item.source.name}: {exc}."
+            kept.append(message)
+            print(message, file=sys.stderr)
+    return kept

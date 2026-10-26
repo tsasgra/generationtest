@@ -11,11 +11,12 @@ from PIL import Image
 
 import pipeline
 from gemini_tool import control
-from gemini_tool.images import archive_uploaded
+from gemini_tool.images import archive_uploaded, delete_uploaded, prepare_images
 from gemini_tool.parts import parts_from_events, write_parts
 from gemini_tool.stop import is_tool_process, is_uploader
-from polygon_tool import batch
-from polygon_tool.input import PARTS, discover_problems, parse_problem
+from polygon_tool import batch, cli
+from polygon_tool.input import PARTS, discover_problems, init_batch, parse_problem
+from polygon_tool.stop import is_uploader as is_polygon_uploader
 from polygon_tool.workflow import atomic_json, digest
 
 
@@ -45,6 +46,7 @@ class PipelineTests(unittest.TestCase):
             """Only the remote workflow is substituted; state/report logic is real."""
             def __init__(self, api, path, parts, options, **kwargs):
                 self.path, self.parts, self.options = path, parts, options
+                self.step = 'test-remote'
                 self.state = json.loads(path.read_text()) if path.exists() else {}
 
             def save(self):
@@ -276,6 +278,96 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(pipeline.main(['resume', '--workers', '2']), 0)
             main.assert_called_once_with(['resume', '--workers', '2'])
             setup.assert_not_called()
+
+
+    def test_blank_templates_are_not_uploaded(self):
+        init_batch(self.root / 'problem')
+        self.assertEqual(discover_problems(self.root / 'problem'), [])
+        self.problem(2)
+        self.problem(10)
+        paths = discover_problems(self.root / 'problem')
+        self.assertEqual([path.name for path in paths], ['problem2', 'problem10'])
+        # A partially edited template must be reported, never silently skipped.
+        (self.root / 'problem/problem3/input.txt').write_text('incomplete')
+        with self.assertRaises(ValueError):
+            batch.preflight(discover_problems(self.root / 'problem'))
+
+    def test_legacy_cli_init_count_restores_all_parts(self):
+        target = self.root / 'templates'
+        self.assertEqual(cli.main(['init', '--output', str(target), '--count', '3']), 0)
+        self.assertEqual(len(list(target.glob('problem*/*.txt'))), 30)
+        self.assertEqual(cli.main(['init', '--output', str(target), '--count', '3']), 1)
+
+    def test_legacy_single_and_batch_dry_run_remain_offline(self):
+        self.problem(2)
+        self.problem(10)
+        with patch.object(cli, 'load_credentials') as credentials:
+            for folder in (self.root / 'problem/problem2', self.root / 'problem'):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(cli.main(['run', '--input', str(folder), '--dry-run', '--jobs', '2']), 0)
+                self.assertTrue(json.loads(output.getvalue())['valid'])
+            credentials.assert_not_called()
+
+    def test_legacy_batch_run_and_resume_preserve_child_checkpoints(self):
+        self.problem(2)
+        self.problem(10)
+        state = self.root / 'run_state.json'
+        arguments = ['--state', str(state), '--output-dir', str(self.root / 'legacy_results')]
+        self.failures.add(10)
+        with patch.object(cli, 'DEFAULT_ENV_FILE', self.root / '.env'):
+            self.assertEqual(cli.main(['run', '--input', str(self.root / 'problem'), '--jobs', '2', *arguments]), 1)
+            saved = json.loads(state.read_text())
+            self.assertEqual(saved['kind'], 'batch')
+            self.assertEqual([row['folder'] for row in saved['problems']], ['problem2', 'problem10'])
+            self.assertTrue((self.root / 'run_state.problems/problem10.json').exists())
+            self.failures.clear()
+            self.assertEqual(cli.main(['resume', *arguments]), 0)
+        self.assertEqual(sorted(n for kind, n in self.events if kind == 'create'), [2, 10])
+        results = json.loads((self.root / 'legacy_results/result.json').read_text())
+        self.assertEqual(results['completed'], 2)
+
+    def test_fresh_pipeline_clears_legacy_child_progress(self):
+        self.images(1)
+        atomic_json(self.root / 'run_state.json', {'kind': 'batch'})
+        child = self.root / 'run_state.problems/problem1.json'
+        atomic_json(child, {'old': True})
+        self.assertEqual(self.run_pipeline(), 0)
+        self.assertFalse((self.root / 'run_state.json').exists())
+        self.assertFalse(child.exists())
+        # Retained lock files must not block a later standalone batch.
+        folder = self.root / 'problem/problem1'
+        batch.BatchWorkflow(self.root / 'run_state.json', [folder], [parse_problem(folder)],
+                            {'request_interval': 1.0})
+
+    def test_legacy_launcher_auto_resume_and_check_routes(self):
+        with patch.object(cli, 'main', return_value=0) as main:
+            with patch.object(Path, 'exists', return_value=False):
+                self.assertEqual(cli.legacy_launch(['auto']), 0)
+                main.assert_called_with(['run', '--input', 'problem', '--state', 'run_state.json'])
+            with patch.object(Path, 'exists', return_value=True):
+                self.assertEqual(cli.legacy_launch(['auto']), 0)
+                main.assert_called_with(['resume', '--state', 'run_state.json'])
+            self.assertEqual(cli.legacy_launch(['check']), 0)
+            main.assert_called_with(['run', '--input', 'problem', '--dry-run'])
+
+    def test_legacy_stop_recognizes_only_polygon_commands(self):
+        for command in ('python.exe polygon_upload.py run --input problem',
+                        'python.exe -m polygon_tool.cli resume',
+                        'python.exe pipeline.py polygon-one run',
+                        'python.exe pipeline.py polygon-legacy auto'):
+            self.assertTrue(is_polygon_uploader({'Name': 'python.exe', 'CommandLine': command}))
+        for command in ('python.exe pipeline.py run', 'python.exe pipeline.py polygon-legacy stop',
+                        'python.exe -c "print(1)" polygon_upload.py run'):
+            self.assertFalse(is_polygon_uploader({'Name': 'python.exe', 'CommandLine': command}))
+
+    def test_legacy_delete_helper_keeps_changed_images(self):
+        self.images(1)
+        original = self.root / 'img/img1/page.png'
+        prepared = prepare_images([original], self.root / 'prepared', 20)
+        original.write_bytes(b'changed since upload')
+        self.assertTrue(delete_uploaded(prepared))
+        self.assertTrue(original.exists())
 
 
 if __name__ == '__main__':

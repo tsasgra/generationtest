@@ -211,7 +211,7 @@ def _run_gemini(arguments: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] in (["--help"], ["-h"]):
-        print("Dùng: python pipeline.py [run|check|init|resume|gemini|polygon|polygon-one|stop] [tùy chọn]\n"
+        print("Dùng: python pipeline.py [run|check|init|resume|gemini|polygon|polygon-one|polygon-legacy|stop] [tùy chọn]\n"
               "  run          ảnh → Gemini → problem → Polygon (mặc định)\n"
               "  check        kiểm tra ảnh offline\n"
               "  init         tạo thư mục img/img1…img10 và problem/problem1…problem10\n"
@@ -219,11 +219,12 @@ def main(argv: list[str] | None = None) -> int:
               "  gemini       chỉ gửi ảnh và lấy 10 phần về problem\n"
               "  polygon      tải lô problem đã có (run/resume)\n"
               "  polygon-one  xử lý hoặc khôi phục một bài Polygon (run/resume)\n"
+              "  polygon-legacy  launcher Polygon cũ (auto/check/resume/stop)\n"
               "  stop         dừng và giữ checkpoint\n"
               "Xem tùy chọn: python pipeline.py run --help hoặc <chế độ> --help.")
         return 0
     action = arguments.pop(0) if arguments and not arguments[0].startswith("-") else "run"
-    if action not in ("run", "check", "init", "resume", "gemini", "polygon", "polygon-one", "stop"):
+    if action not in ("run", "check", "init", "resume", "gemini", "polygon", "polygon-one", "polygon-legacy", "stop"):
         print("Chế độ không hợp lệ. Chạy python pipeline.py --help.", file=sys.stderr)
         return 2
     try:
@@ -232,6 +233,9 @@ def main(argv: list[str] | None = None) -> int:
             return stop(arguments[1:] if action == "gemini" else arguments)
         if action == "gemini":
             return _run_gemini(arguments)
+        if action == "polygon-legacy":
+            from polygon_tool.cli import legacy_launch
+            return legacy_launch(arguments)
         if action in ("resume", "polygon", "polygon-one"):
             if action == "polygon-one":
                 from polygon_tool.cli import main as polygon

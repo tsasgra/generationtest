@@ -17,11 +17,12 @@ nội dung thủ công giữa hai bước.
 ## Cách dùng
 
 1. Clone hoặc tải toàn bộ nhánh `main`. Cài Python 3.10+ và Chrome hoặc Edge trên Windows.
-2. Chạy `start.bat init` một lần để tạo `img/img1`…`img/img10` và `problem/problem1`…`problem/problem10`.
+2. Repository có sẵn `img/img1`…`img/img10` và 10 bộ file trống trong `problem/problem1`…`problem/problem10`.
+   Có thể dùng `start.bat init` để tạo lại các thư mục bị thiếu.
 3. Đặt ảnh vào các thư mục `img/imgN/`. Nếu đề có nhiều trang, đặt tên ảnh theo thứ tự,
    chẳng hạn `01.png`, `02.png`. Cũng chấp nhận `img/img(1)/`…`img/img(10)/`;
    không dùng đồng thời `img1` và `img(1)`.
-4. Tạo file `.env` cạnh `pipeline.py`:
+4. Chép `.env.example` thành `.env` cạnh `pipeline.py` và điền khóa của bạn:
 
    ```dotenv
    POLYGON_API_KEY=your_api_key
@@ -34,8 +35,9 @@ nội dung thủ công giữa hai bước.
 6. Khi hoàn tất, mở **`report.txt`** để lấy link Polygon theo thứ tự bài.
 
 Biến môi trường cũng được hỗ trợ thay cho `.env`. File `.env` được đọc như văn bản,
-không thực thi lệnh. Ảnh, đề bài, khóa API, profile trình duyệt và kết quả chạy đều
-được bỏ qua bởi Git.
+không thực thi lệnh. Khóa API, ảnh, profile trình duyệt và checkpoint/kết quả phụ được
+bỏ qua bởi Git. Riêng 100 file `.txt` mẫu trong `problem/` được theo dõi để giữ đầy đủ
+cấu trúc của nhánh Polygon; khi sinh đề vào các file này, Git sẽ hiển thị thay đổi cục bộ.
 
 ## Lệnh chạy
 
@@ -51,6 +53,23 @@ Các lệnh đều dùng chung `start.bat` hoặc `python pipeline.py`:
 | `start.bat gemini` | Chỉ gửi ảnh lên Gemini và lưu nội dung vào `problem/` |
 | `start.bat polygon` | Tải các bộ nội dung đã có trong `problem/` lên Polygon |
 | `start.bat polygon-one resume --state .pipeline-state/polygon/02.json` | Khôi phục riêng bài 2 |
+
+Các điểm vào từ hai nhánh vẫn có trong `main`:
+
+| File/lệnh cũ | Hành vi sau hợp nhất |
+| --- | --- |
+| `start_gemini.bat`, `python -m gemini_tool.launch` | Chạy riêng Gemini qua bộ khởi động chung |
+| `python gemini_upload.py` | CLI Gemini, giữ các tùy chọn `--input`, `--dry-run`, `--attach-only`, `--keep-images` |
+| `python polygon_upload.py` | CLI Polygon một bài/nhiều bài, hỗ trợ `init --count`, `--jobs`, `--url-only` và checkpoint cũ |
+| `start_polygon.bat` | Chế độ Start của nhánh Polygon: tự chạy mới hoặc tiếp tục `run_state.json` |
+| `start_check.bat` | Kiểm tra nội dung `problem/` offline; `start.bat check` kiểm tra ảnh |
+| `start_resume.bat` | Tiếp tục checkpoint pipeline nếu có; nếu không, tiếp tục `run_state.json` |
+| `stop_polygon.bat`, `python -m polygon_tool.stop` | Stop/reset của nhánh Polygon: dừng uploader riêng và xóa checkpoint/kết quả cũ của chế độ này |
+
+`stop.bat` vẫn dừng luồng chung và giữ checkpoint để Resume. Chế độ Polygon riêng lưu
+checkpoint con trong `run_state.problems/`, kết quả trong `results/`, `result.json` và
+`problem_url.txt`. Cả hai định dạng checkpoint đều được giữ, không tự chuyển đổi lẫn nhau.
+Các bộ 10 file mẫu hoàn toàn trống được bỏ qua; bộ chỉ điền một phần sẽ báo lỗi.
 
 Ví dụ giảm số tác vụ đồng thời và tăng thời gian chờ:
 
@@ -109,8 +128,14 @@ khôi phục riêng bài theo hướng dẫn lỗi rồi chạy Resume cho cả 
 `pipeline.py` là điểm vào chung, gồm khởi động môi trường và điều phối các giai đoạn.
 `pipeline_reset.py` quản lý reset và khóa phiên chạy. `gemini_tool/` chứa trình duyệt,
 ảnh và bộ đọc phản hồi; `polygon_tool/` chứa API, bộ đọc 10 phần và quy trình tải bài.
-Hai nhánh dùng chung một bộ xử lý batch, một danh sách thư viện và một launcher.
-Các file khởi chạy cũ được thay bằng các chế độ trong bảng trên.
+Các file trùng tên được hợp nhất trong cùng module; các launcher cũ gọi lại mã dùng
+chung. `polygon_tool/batch.py` giữ cả bộ xử lý pipeline và bộ đọc checkpoint của CLI
+Polygon riêng. `requirements-gemini.txt` dùng lại `requirements.txt`, còn
+`requirements-browser.txt` dành cho browser fallback của Polygon.
+
+Hướng dẫn chi tiết từ hai nhánh được giữ tại [Gemini](docs/gemini.md) và
+[Polygon](docs/polygon.md). [Bảng đối chiếu](docs/merge-inventory.md) ghi nguồn và cách
+hợp nhất từng nhóm file. File `.env` chứa khóa được giữ cục bộ; Git chỉ nhận `.env.example`.
 
 ```powershell
 python -m pip install -r requirements.txt
