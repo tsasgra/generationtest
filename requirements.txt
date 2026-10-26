@@ -1,2 +1,7 @@
-# Full image -> Gemini -> Polygon pipeline (Python 3.10+).
--r requirements-gemini.txt
+# Shared dependencies for the combined and standalone runners (Python 3.10+).
+playwright>=1.48,<2
+websocket-client>=1.8,<2
+Pillow>=11.3,<13
+pillow-heif>=1,<2
+resvg-py>=0.3,<1
+rawpy>=0.21,<1

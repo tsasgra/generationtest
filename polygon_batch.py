@@ -182,7 +182,7 @@ def _write_report(path: Path, entries: list[dict], outcomes: list[dict]) -> None
             # One logical row per problem, even if a remote diagnostic is multiline.
             message = ' '.join(message.splitlines())
             lines.append(f"{prefix}: {labels[outcome['status']]}" + (f' — {message}' if message else ''))
-    image_warnings = [f"problem{entry['number']} thiếu ảnh" for entry in entries
+    image_warnings = [f"problem{entry['number']}, {entry['name']}, thiếu ảnh" for entry in entries
                       if has_image_reference(entry['parts'])]
     if image_warnings:
         lines.extend(['', 'Cần bổ sung ảnh thủ công trên Polygon:', *image_warnings])

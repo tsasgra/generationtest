@@ -12,6 +12,7 @@ from gemini_tool.browser import GeminiBrowserError, UploadTask, upload_images, u
 from gemini_tool.control import RUNTIME, StopRequested, check_stop, upload_run
 from gemini_tool.images import ImageInputError, collect_images, prepare_images
 from gemini_tool.native import find_system_browser
+from gemini_tool.parts import DEFAULT_PROMPT
 from gemini_tool.state import ordinary_directory, remember_profile
 from gemini_tool.stop import reset_run
 
@@ -57,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10,
                         help="Chỉ dùng với --input: số ảnh mỗi chat (1–10). img/img1–img/img10 luôn gửi cả thư mục trong một chat.")
     parser.add_argument("--max-file-mb", type=positive_number, default=20, help="Giới hạn MiB mỗi PNG sau chuyển đổi.")
-    parser.add_argument("--prompt", default="apply polygon-problem-setter skill", help="Nội dung gửi kèm ảnh trong mỗi chat.")
+    parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="Nội dung gửi kèm ảnh; mặc định yêu cầu đủ 10 phần Polygon.")
     parser.add_argument("--keep-images", action="store_true", help="Giữ ảnh trong thư mục nguồn; mặc định chuyển vào problem tương ứng trong thư mục img.")
     parser.add_argument("--attach-only", action="store_true", help="Chỉ đính kèm, không gửi và không xóa ảnh.")
     args = parser.parse_args(argv)
@@ -130,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Lỗi: {exc}", file=sys.stderr)
         return 1
     except ImportError as exc:
-        print(f"Thiếu thư viện ({exc.name}). Chạy: python -m pip install -r requirements-gemini.txt", file=sys.stderr)
+        print(f"Thiếu thư viện ({exc.name}). Chạy: python -m pip install -r requirements.txt", file=sys.stderr)
         return 1
     except StopRequested:
         print("\nĐã dừng uploader theo yêu cầu Stop. Ảnh chưa xác nhận được giữ lại.", file=sys.stderr)

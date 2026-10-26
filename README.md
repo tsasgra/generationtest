@@ -2,6 +2,8 @@
 
 `start.bat` chạy trọn luồng cho **10 bài**: gửi ảnh lên 10 tab Gemini song song, lấy đủ 10 phần của từng bài, rồi tải 10 bài lên Polygon song song. Khi hoàn tất, `report.txt` chứa link chính thức theo thứ tự `problem1` đến `problem10`.
 
+Tải hoặc clone toàn bộ nhánh `main` rồi bấm đúp `start.bat`. Các script Python được giữ thành file rời trong thư mục dự án; mọi chế độ chạy dùng chung `pipeline_launch.py` và danh sách thư viện `requirements.txt`.
+
 ## Chuẩn bị
 
 Cài Python 3.10 trở lên và Chrome hoặc Edge trên Windows. Lần đầu chạy Start, công cụ tạo `.venv-gemini` và cài các thư viện còn thiếu. Đăng nhập Google trực tiếp trong cửa sổ trình duyệt được mở; các lần sau dùng lại profile riêng `.gemini-browser-native`.
@@ -26,7 +28,10 @@ Cấu hình hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong file `.e
 | **`start.bat`** | Xóa checkpoint và toàn bộ dữ liệu trong `problem/`, kể cả `img/` của từng bài, rồi tạo lại 10 thư mục problem trống và bắt đầu lượt mới. |
 | `start_check.bat` | Kiểm tra đủ 10 bộ ảnh, không xóa nội dung cũ và không gọi Gemini/Polygon. |
 | `start_resume.bat` | Tiếp tục giai đoạn Polygon đã có checkpoint; không gửi lại ảnh và không xóa đầu vào. |
-| `stop.bat` | Dừng các tiến trình thuộc luồng chạy. |
+| `stop.bat` | Dừng các tiến trình thuộc luồng chạy, giữ checkpoint và kết quả Polygon để Resume. |
+| `start_gemini.bat` | Chạy riêng bước gửi ảnh và nhận đủ 10 phần; giữ cơ chế dọn phiên Gemini và dùng lại đăng nhập. |
+
+`start.bat` cũng nhận các chế độ `run`, `check`, `resume`, `stop`, `init`, `gemini`, `polygon`. Bấm đúp hoặc chỉ truyền tùy chọn như `start.bat --workers 5` sẽ chạy luồng đầy đủ. Các file Check/Resume/Stop/Gemini là nút tắt gọi cùng bộ khởi động.
 
 Start dọn checkpoint mặc định, dữ liệu tạm, kết quả Polygon, `report.txt` cũ và **toàn bộ nội dung `problem/`**: file `.txt`, ảnh đã lưu, `img/uploaded/`, thư mục con và dữ liệu còn sót lại. Sau đó chỉ còn 10 thư mục `problem/problem1`…`problem/problem10` trống để nhận kết quả mới. Ảnh đầu vào trong `img/imgN/`, `.env`, thư viện đã cài và phiên đăng nhập Google được giữ lại. Start không xóa bài hoặc cuộc trò chuyện đã tạo trên máy chủ. Muốn gửi lại ảnh đã chuyển, chép chúng từ `problem/problemN/img/` về `img/imgN/` **trước khi Start**. Nếu muốn tiếp tục cùng các bài Polygon và giữ dữ liệu của lượt hiện tại, dùng Resume.
 
@@ -34,7 +39,7 @@ Mỗi bài phải trả về đủ một bộ 10 phần, gồm `name problem.txt
 
 Nếu Gemini lỗi hoặc thiếu phần, luồng dừng trước khi tạo bài trên Polygon. Sau khi đủ cả 10 bộ hợp lệ, các tác vụ Polygon chạy song song với checkpoint riêng cho mỗi bài. Khi một bài lỗi, công cụ ghi rõ tình trạng trong báo cáo và giữ kết quả của những bài đã thành công; không báo đủ 10 link khi chưa hoàn tất.
 
-Nếu `input`, `output`, `note`, `name` hoặc `legend`/`lengend` có tham chiếu ảnh, ví dụ `\includegraphics{hinh.png}`, công cụ vẫn tải nội dung lên như bình thường và thêm dòng **`problemN thiếu ảnh`** ở cuối `report.txt` cho từng bài liên quan. Cảnh báo được giữ cả khi một bài chưa tạo package thành công và khi Resume. Công cụ không tự tải ảnh vào **Statement Resource Files** của Polygon; bạn dùng ảnh trong `problem/problemN/img/` để bổ sung thủ công, với tên file khớp đường dẫn trong statement.
+Nếu `input`, `output`, `note`, `name` hoặc `legend`/`lengend` có tham chiếu ảnh, ví dụ `\includegraphics{hinh.png}`, công cụ vẫn tải nội dung lên như bình thường và thêm dòng **`problemN, nameproblem, thiếu ảnh`** ở cuối `report.txt` cho từng bài liên quan. `nameproblem` lấy từ `name problem.txt`, ví dụ `problem2, tam-giac-sao-nguoc, thiếu ảnh`. Mỗi bài chỉ có một dòng cảnh báo, kể cả khi có nhiều ảnh; cảnh báo được giữ khi một bài gặp lỗi và khi Resume. Bạn dùng ảnh trong `problem/problemN/img/` để bổ sung thủ công vào **Statement Resource Files** của Polygon, với tên file khớp đường dẫn trong statement.
 
 Nếu tên PNG gửi cho Gemini khác tên ảnh gốc, bản PNG đó được giữ thêm trong `problem/problemN/img/uploaded/`. Khi statement tham chiếu tên dạng `0001_...png`, dùng bản trong `uploaded/` trước lượt Start tiếp theo. Khi chạy riêng giai đoạn Gemini mà không reset, ảnh trùng tên nhưng khác nội dung được thêm hậu tố để không ghi đè.
 
@@ -65,6 +70,16 @@ python polygon_batch.py resume --input problem --state-dir .pipeline-state/polyg
 Các checkpoint được lưu riêng trong `.pipeline-state/polygon/`; kết quả từng bài ở `polygon_results/`. Khi Polygon báo request tạo bài hoặc build mất phản hồi, kiểm tra trạng thái thật trên Polygon trước khi khôi phục theo thông báo của công cụ; không bấm Start để thử tạo lại cùng tên.
 
 `gemini_upload.py` và `polygon_upload.py` vẫn hỗ trợ chạy từng giai đoạn. `python polygon_upload.py --help` hiển thị tùy chọn khôi phục một bài (`--problem-id`, `--package-id`, `--update-input`, `--retry-failed-package`). Luồng ảnh riêng có thể bỏ qua thư mục trống; luồng chung `pipeline.py` yêu cầu đủ 10 bài.
+
+Có thể dùng cùng launcher để tạo thư mục, chạy riêng Gemini hoặc khôi phục một bài Polygon:
+
+```powershell
+start.bat init
+start.bat gemini --workers 5
+start.bat polygon resume --state .pipeline-state/polygon/01.json
+```
+
+Cả hai chế độ Gemini dùng chung lời nhắc yêu cầu đủ 10 phần và cùng bộ kiểm tra đầu ra. `--prompt` cho phép thay lời nhắc khi cần. `start_gemini.bat --stop` vẫn gọi chức năng Stop chung.
 
 ## Phạm vi kiểm tra
 

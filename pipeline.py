@@ -10,7 +10,7 @@ import tempfile
 from gemini_tool.browser import GeminiBrowserError, UploadTask, upload_tasks
 from gemini_tool.control import StopRequested, check_stop
 from gemini_tool.images import ImageInputError, collect_images, prepare_images
-from gemini_tool.parts import validate_output
+from gemini_tool.parts import DEFAULT_PROMPT, validate_output
 from gemini_tool.state import ordinary_directory, remember_profile
 from gemini_upload import positive_number
 from polygon_tool.credentials import load_credentials
@@ -19,23 +19,6 @@ from polygon_upload import validate_options
 
 ROOT = Path(__file__).resolve().parent
 PROBLEM_COUNT = 10
-DEFAULT_PROMPT = """apply polygon-problem-setter skill
-Các ảnh trong tin nhắn này thuộc cùng MỘT bài toán. Đọc đủ ảnh, giữ nguyên đề,
-ràng buộc và ví dụ; tạo trọn bộ nội dung Polygon cho bài này bằng tiếng Việt.
-Trả về đúng 10 phần theo thứ tự dưới đây. Mỗi tiêu đề viết dạng “Part N: tên phần”,
-ngay dưới tiêu đề là đúng một khối code chứa toàn bộ nội dung phần đó.
-Part 1: name problem — tên định danh chỉ gồm chữ thường a-z, chữ số và dấu -.
-Part 2: name — tên hiển thị trên một dòng.
-Part 3: lengend — nội dung đề bằng LaTeX.
-Part 4: input — mô tả dữ liệu vào bằng LaTeX.
-Part 5: output — mô tả dữ liệu ra bằng LaTeX.
-Part 6: note — ghi chú bằng LaTeX; dùng khối code rỗng nếu không có.
-Part 7: checker — mã nguồn checker C++17 dùng testlib.h.
-Part 8: gen — mã nguồn bộ sinh test C++17 dùng testlib.h.
-Part 9: script_sinh_test — script sinh test tương thích Polygon.
-Part 10: solution — mã nguồn lời giải tối ưu C++17.
-Không bỏ phần, không gộp nhiều bài, không thay code bằng lời giải thích.
-"""
 
 
 def directories(root: Path) -> tuple[list[Path], list[Path]]:
