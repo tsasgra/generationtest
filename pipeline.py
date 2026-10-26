@@ -87,25 +87,19 @@ def execute(args, *, root: Path = ROOT) -> int:
         runtime = root / ".gemini-runtime"
         tasks = []
         selected = []
-        temporary = None
         resume = args.command == "resume"
-
-        def prepare():
-            nonlocal temporary
-            # Missing credentials/images must not erase the previous results.
-            load_credentials(root / ".env")
-            runtime.mkdir(parents=True, exist_ok=True)
-            temporary = held.enter_context(tempfile.TemporaryDirectory(prefix="upload-", dir=runtime))
-            if resume:
-                manifest = json.loads((root / ".pipeline-state/polygon/batch.json").read_text(encoding="utf-8"))
-                selected.extend(Path(entry["path"]) for entry in manifest["inputs"])
-                if any(path not in problem_dirs for path in selected):
-                    raise ValueError("Thư mục bài trong checkpoint không thuộc lượt chạy này.")
-            else:
-                tasks.extend(prepare_tasks(root, Path(temporary), args.max_file_mb))
-                selected.extend(task.output for task in tasks)
-
-        held.enter_context(fresh_run(root, problem_dirs, args.profile, before_reset=prepare, resume=resume))
+        held.enter_context(fresh_run(root, problem_dirs, args.profile, resume=resume))
+        load_credentials(root / ".env")
+        runtime.mkdir(parents=True, exist_ok=True)
+        temporary = held.enter_context(tempfile.TemporaryDirectory(prefix="upload-", dir=runtime))
+        if resume:
+            manifest = json.loads((root / ".pipeline-state/polygon/batch.json").read_text(encoding="utf-8"))
+            selected.extend(Path(entry["path"]) for entry in manifest["inputs"])
+            if any(path not in problem_dirs for path in selected):
+                raise ValueError("Thư mục bài trong checkpoint không thuộc lượt chạy này.")
+        else:
+            tasks.extend(prepare_tasks(root, Path(temporary), args.max_file_mb))
+            selected.extend(task.output for task in tasks)
         initialize(root)
         remember_profile(runtime, args.profile)
 
@@ -196,7 +190,7 @@ def run_pipeline(argv: list[str] | None = None) -> int:
     try:
         return execute(args)
     except (StopRequested, KeyboardInterrupt):
-        print("Đã dừng. Dùng start.bat resume để tiếp tục bài đang dở và các bài còn lại.", file=sys.stderr)
+        print("Đã dừng. Mở start.bat để dọn lượt cũ và chạy mới từ ảnh trong img/.", file=sys.stderr)
         return 130
     except ImportError as exc:
         print(f"Thiếu thư viện {exc.name}. Chạy start.bat để cài thư viện.", file=sys.stderr)
@@ -258,67 +252,10 @@ def _run_gemini(arguments: list[str]) -> int:
         return subprocess.call([str(python), "-u", "-m", "gemini_tool.cli", *arguments], cwd=ROOT)
 
 
-def menu(arguments: list[str] | None = None) -> int:
-    """One Windows launcher for Start/Stop and all existing standalone modes."""
-    if arguments:
-        return main(arguments)
-    actions = {
-        "1": ("START mới: dừng lượt cũ, xóa checkpoint và chạy lại từ ảnh", ["run"]),
-        "2": ("STOP: dừng tác vụ, giữ kết quả đang có", ["stop"]),
-        "3": ("Tiếp tục lượt đang dở (Resume)", ["resume"]),
-        "4": ("Kiểm tra ảnh", ["check"]),
-        "5": ("Chạy riêng Gemini", ["gemini"]),
-        "6": ("Tải nội dung problem lên Polygon", ["polygon"]),
-        "7": ("Chạy/tiếp tục Polygon theo checkpoint cũ", ["polygon-legacy", "auto"]),
-        "8": ("Kiểm tra nội dung problem", ["polygon-legacy", "check"]),
-        "9": ("Tạo các thư mục img/problem", ["init"]),
-        "R": ("Dừng và xóa checkpoint của chế độ Polygon cũ", ["polygon-legacy", "stop"]),
-    }
-    while True:
-        print("\n=== Gemini → Polygon: Start / Stop ===")
-        for key, (label, _) in actions.items():
-            print(f"{key}. {label}")
-        print("0. Đóng menu (tác vụ đang chạy vẫn tiếp tục)")
-        try:
-            choice = input("Chọn: ").strip().upper()
-        except (EOFError, KeyboardInterrupt):
-            return 0
-        if choice == "0":
-            return 0
-        if choice not in actions:
-            print("Lựa chọn không hợp lệ.")
-            continue
-        command = actions[choice][1]
-        try:
-            if sys.platform == "win32" and choice not in ("2", "R"):
-                subprocess.Popen(
-                    [sys.executable, "-u", str(ROOT / "pipeline.py"), "menu-task", *command],
-                    cwd=ROOT, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10),
-                )
-                print("Đã mở cửa sổ tác vụ. Chọn 2 trong menu này khi cần dừng.")
-            else:
-                result = main(command)
-                if result:
-                    print(f"Tác vụ chưa hoàn tất (mã {result}); xem thông báo phía trên.")
-        except OSError as exc:
-            print(f"Không mở được tác vụ: {exc}", file=sys.stderr)
-
-
-def menu_task(arguments: list[str]) -> int:
-    """Keep a detached task's console available for reading its result."""
-    result = main(arguments)
-    try:
-        input("\nNhấn Enter để đóng cửa sổ tác vụ...")
-    except (EOFError, KeyboardInterrupt):
-        pass
-    return result
-
-
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] in (["--help"], ["-h"]):
-        print("Dùng: python pipeline.py [menu|run|check|init|resume|gemini|polygon|polygon-one|polygon-legacy|stop] [tùy chọn]\n"
-              "  menu         menu Start/Stop dùng chung\n"
+        print("Dùng: python pipeline.py [run|check|init|resume|gemini|polygon|polygon-one|polygon-legacy|stop] [tùy chọn]\n"
               "  run          ảnh → Gemini → problem → Polygon (mặc định)\n"
               "  check        kiểm tra ảnh offline\n"
               "  init         tạo thư mục img/img1…img10 và problem/problem1…problem10\n"
@@ -331,14 +268,10 @@ def main(argv: list[str] | None = None) -> int:
               "Xem tùy chọn: python pipeline.py run --help hoặc <chế độ> --help.")
         return 0
     action = arguments.pop(0) if arguments and not arguments[0].startswith("-") else "run"
-    if action not in ("menu", "menu-task", "run", "check", "init", "resume", "gemini", "polygon", "polygon-one", "polygon-legacy", "stop"):
+    if action not in ("run", "check", "init", "resume", "gemini", "polygon", "polygon-one", "polygon-legacy", "stop"):
         print("Chế độ không hợp lệ. Chạy python pipeline.py --help.", file=sys.stderr)
         return 2
     try:
-        if action == "menu":
-            return menu(arguments)
-        if action == "menu-task":
-            return menu_task(arguments)
         if action == "stop" or (action == "gemini" and arguments[:1] == ["--stop"]):
             from gemini_tool.stop import main as stop
             return stop(arguments[1:] if action == "gemini" else arguments)

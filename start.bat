@@ -1,29 +1,30 @@
 @echo off
 setlocal DisableDelayedExpansion
 chcp 65001 >nul
-title Gemini to Polygon - Start / Stop
+title Gemini to Polygon - Fresh Start
 set "PIPELINE_EXIT_CODE=1"
 set "PYTHONUTF8=1"
 pushd "%~dp0"
 if errorlevel 1 goto folder_error
+echo Start: dừng lượt cũ, xóa trạng thái và chạy mới từ ảnh trong img/.
 if not exist ".venv-gemini\Scripts\python.exe" goto try_py
 ".venv-gemini\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 goto try_py
-".venv-gemini\Scripts\python.exe" pipeline.py menu %*
+".venv-gemini\Scripts\python.exe" -u pipeline.py run %*
 set "PIPELINE_EXIT_CODE=%errorlevel%"
 goto done
 
 :try_py
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 goto try_python
-py -3 pipeline.py menu %*
+py -3 -u pipeline.py run %*
 set "PIPELINE_EXIT_CODE=%errorlevel%"
 goto done
 
 :try_python
 python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 goto python_missing
-python pipeline.py menu %*
+python -u pipeline.py run %*
 set "PIPELINE_EXIT_CODE=%errorlevel%"
 goto done
 

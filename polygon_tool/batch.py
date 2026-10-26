@@ -230,7 +230,7 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                         raise BatchError('Đầu vào khác checkpoint; không tiếp tục ghi lên Polygon.')
                     entries[index] = current
                 elif prepare is None:
-                    raise BatchError('Còn bài chưa nhận từ Gemini. Dùng start.bat resume để tiếp tục toàn bộ luồng.')
+                    raise BatchError('Còn bài chưa nhận từ Gemini. Dùng python pipeline.py resume để tiếp tục toàn bộ luồng.')
             if manifest.get('output_dir') != str(output_dir) or manifest.get('report_path') != str(report_path):
                 raise BatchError('Đường dẫn kết quả/report phải khớp checkpoint khi resume.')
             if not isinstance(manifest.get('options'), dict):

@@ -99,7 +99,7 @@ def _clear_outputs(root: Path, problem_dirs: list[Path], legacy: list[Path]) -> 
 def stop_previous_run(root: Path, profile: Path) -> None:
     """Windows Start replaces previous workers before setup or lifecycle locks.
 
-    The resetter and its ancestors (including the menu) are protected by Stop.
+    The resetter and its parent launchers are protected by Stop.
     Non-Windows callers retain the cooperative stop/lock behavior of the CLI.
     """
     if sys.platform != "win32":
@@ -117,11 +117,11 @@ def stop_previous_run(root: Path, profile: Path) -> None:
 
 
 @contextmanager
-def fresh_run(root: Path, problem_dirs: list[Path], profile: Path, *, before_reset=None, resume=False):
+def fresh_run(root: Path, problem_dirs: list[Path], profile: Path, *, resume=False):
     """Hold the run locks through a fresh or resumed sequential pipeline.
 
     Browser runtime is reset before yielding. Resume keeps problem data and
-    checkpoints; a fresh run clears them once after preflight succeeds.
+    checkpoints; a fresh run clears them before preparing new input.
     Lock files are synchronization, not progress; active locks stay in place.
     """
     root = Path(root).absolute()
@@ -151,10 +151,6 @@ def fresh_run(root: Path, problem_dirs: list[Path], profile: Path, *, before_res
                 # Only orphan connections can remain: active uploaders own the
                 # launch/upload locks above. Preserve the native login profile.
                 reset_run(root, [profile], stop_processes=False)
-                # Validate this run before removing any previous problem data.
-                # A callback can prepare uploads after old runtime cleanup.
-                if before_reset is not None:
-                    before_reset()
                 if not resume:
                     print("Đang xóa checkpoint, kết quả cũ và toàn bộ dữ liệu trong problem, kể cả img...", flush=True)
                     _clear_outputs(root, problem_dirs, legacy)

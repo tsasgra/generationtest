@@ -217,27 +217,48 @@ class PipelineTests(unittest.TestCase):
                 parser.parse_args(arguments)
             self.assertEqual(error.exception.code, 2)
 
-    def test_menu_start_opens_worker_and_stop_stays_available(self):
-        with patch.object(sys, 'platform', 'win32'), \
-                patch('builtins.input', side_effect=['1', '2', '0']), \
-                patch.object(pipeline.subprocess, 'Popen') as launch, \
-                patch.object(pipeline, 'main', return_value=0) as command:
-            self.assertEqual(pipeline.menu(), 0)
-            launch.assert_called_once_with(
-                [sys.executable, '-u', str(pipeline.ROOT / 'pipeline.py'), 'menu-task', 'run'],
-                cwd=pipeline.ROOT, creationflags=0x10)
-            launch.return_value.wait.assert_not_called()
-            command.assert_called_once_with(['stop'])
+    def test_default_start_discards_checkpoints_without_prompt(self):
+        self.images(1, 2)
+        old = self.problem(2) / 'unfinished.tmp'
+        old.write_text('interrupted export')
+        state = self.root / '.pipeline-state/polygon/batch.json'
+        state.parent.mkdir(parents=True)
+        state.write_text('broken previous checkpoint')
+        (self.root / 'run_state.json').write_text('broken legacy checkpoint')
+        execute = pipeline.execute
 
-    def test_menu_forwards_cli_arguments_unchanged(self):
-        with patch.object(pipeline, 'main', return_value=7) as command:
-            self.assertEqual(pipeline.menu(['gemini', '--input', 'a folder']), 7)
-            command.assert_called_once_with(['gemini', '--input', 'a folder'])
+        def generate(tasks, **options):
+            self.assertFalse(old.exists())
+            self.assertFalse((self.root / 'run_state.json').exists())
+            self.gemini(tasks, **options)
 
-    def test_stop_preserves_menu_but_recognizes_its_workers(self):
-        for command in ('python.exe pipeline.py menu', 'python.exe -m pipeline menu'):
-            self.assertFalse(is_tool_process({'Name': 'python.exe', 'CommandLine': command}, self.root))
-        for command in ('python.exe pipeline.py menu-task run',
+        self.remote.side_effect = generate
+        with patch.object(pipeline, 'ROOT', self.root), \
+                patch.object(pipeline, '_python_with_dependencies', return_value=Path(sys.executable)), \
+                patch.object(pipeline, 'execute', side_effect=lambda args: execute(args, root=self.root)), \
+                patch.object(pipeline, 'saved_pipeline_options', side_effect=AssertionError('Must not resume')), \
+                patch('builtins.input', side_effect=AssertionError('Start must not prompt')):
+            self.assertEqual(pipeline.main([]), 0)
+        self.assertEqual(self.events, [(event, number) for number in (1, 2)
+                                       for event in ('export', 'create', 'complete')])
+        self.assertEqual(json.loads(state.read_text())['outcomes'][1]['status'], 'complete')
+
+    def test_restart_repeats_gemini_and_polygon_after_interrupted_run(self):
+        self.images(1, 2)
+        self.failures.add(2)
+        with self.assertRaises(batch.BatchError):
+            self.run_pipeline()
+        self.failures.clear()
+        self.events.clear()
+        # Completed exports archive the inputs; the user supplies images again.
+        self.images(1, 2)
+        self.assertEqual(self.run_pipeline(), 0)
+        self.assertEqual(self.events, [(event, number) for number in (1, 2)
+                                       for event in ('export', 'create', 'complete')])
+
+    def test_stop_recognizes_old_menus_and_their_workers(self):
+        for command in ('python.exe pipeline.py menu', 'python.exe -m pipeline menu',
+                        'python.exe pipeline.py menu-task run',
                         'python.exe pipeline.py menu run',
                         'python.exe -m pipeline menu run'):
             self.assertTrue(is_tool_process({'Name': 'python.exe', 'CommandLine': command}, self.root))
@@ -340,39 +361,44 @@ class PipelineTests(unittest.TestCase):
             self.upload([1, 2])
         self.assertEqual(self.events, [])
 
-    def test_missing_credentials_keep_old_outputs(self):
+    def test_missing_credentials_stop_after_clearing_old_outputs(self):
         self.images(1)
         self.problem(1)
         (self.root / '.env').unlink()
         with self.assertRaises(ValueError):
             self.run_pipeline()
-        self.assertEqual(parse_problem(self.root / 'problem/problem1')['name problem'], 'task-1')
+        self.assertEqual(list((self.root / 'problem/problem1').iterdir()), [])
+        self.assertTrue((self.root / 'img/img1/page.png').is_file())
         self.remote.assert_not_called()
 
-    def test_empty_images_keep_old_outputs(self):
+    def test_empty_images_stop_after_clearing_old_outputs_and_checkpoint(self):
         old = self.problem(1)
+        atomic_json(self.root / '.pipeline-state/polygon/batch.json', {'unfinished': True})
         with self.assertRaisesRegex(ValueError, 'Chưa có ảnh'):
             self.run_pipeline()
-        self.assertTrue((old / 'solution.txt').exists())
+        self.assertFalse((old / 'solution.txt').exists())
+        self.assertFalse((self.root / '.pipeline-state').exists())
         self.remote.assert_not_called()
 
-    def test_corrupt_image_keeps_old_outputs(self):
+    def test_corrupt_image_stops_after_clearing_old_outputs(self):
         self.images(1)
         old = self.problem(1)
         (self.root / 'img/img1/broken.png').write_bytes(b'not an image')
         with self.assertRaises(ValueError):
             self.run_pipeline()
-        self.assertTrue((old / 'solution.txt').exists())
+        self.assertFalse((old / 'solution.txt').exists())
+        self.assertEqual((self.root / 'img/img1/broken.png').read_bytes(), b'not an image')
         self.remote.assert_not_called()
 
-    def test_multiframe_input_rejected_without_reset(self):
+    def test_multiframe_input_rejected_after_reset(self):
         self.images(1)
         old = self.problem(1)
         Image.new('RGB', (8, 8), 'white').save(self.root / 'img/img1/multi.gif', save_all=True,
                                             append_images=[Image.new('RGB', (8, 8), 'black')])
         with self.assertRaisesRegex(ValueError, 'nhiều trang'):
             self.run_pipeline()
-        self.assertTrue((old / 'solution.txt').exists())
+        self.assertFalse((old / 'solution.txt').exists())
+        self.remote.assert_not_called()
 
     def test_check_is_offline_and_keeps_previous_results(self):
         self.images(1)

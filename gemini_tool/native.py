@@ -98,7 +98,7 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
     except (OSError, ValueError, KeyError, TypeError):
         pass
     if running:
-        raise ValueError("Trình duyệt của lần chạy trước vẫn mở. Chạy start.bat stop rồi mở lại Start.")
+        raise ValueError("Trình duyệt của lần chạy trước vẫn mở. Chạy python pipeline.py stop rồi mở lại Start.")
     reset_browser_state(profile)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -192,7 +192,7 @@ def close_native_browser(_browser, session_file: Path) -> None:
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired as exc:
-        raise ValueError("Chrome/Edge chưa đóng hoàn toàn. Chạy start.bat stop trước khi Start lại.") from exc
+        raise ValueError("Chrome/Edge chưa đóng hoàn toàn. Chạy python pipeline.py stop trước khi Start lại.") from exc
     _ACTIVE_BROWSERS.pop(session_file, None)
     session_file.unlink(missing_ok=True)
 

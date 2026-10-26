@@ -1,6 +1,6 @@
 # Đối chiếu hợp nhất hai nhánh
 
-Mã nguồn, thư viện, thư mục mẫu và các chức năng của cả hai nhánh đã được đưa vào `main`. Theo yêu cầu gộp Start/Stop, các launcher phụ được thay bằng menu và các lệnh của `start.bat`.
+Mã nguồn, thư viện, thư mục mẫu và các chức năng của cả hai nhánh đã được đưa vào `main`. Theo yêu cầu gộp Start/Stop, chỉ giữ `start.bat` tự dừng, dọn và chạy mới; các chế độ riêng dùng CLI `pipeline.py`.
 Các file trùng tên giữ chung một đường dẫn và hợp nhất chức năng. `.env` là ngoại lệ: khóa giữ cục bộ, Git dùng `.env.example`.
 
 Nguồn ban đầu có **144 đường dẫn**. Bảng dưới ghi cách giữ hoặc gộp từng nhóm; `.env` chứa khóa được thay bằng mẫu trong Git.
@@ -33,7 +33,7 @@ Nguồn ban đầu có **144 đường dẫn**. Bảng dưới ghi cách giữ h
 | `polygon_tool/batch.py` | Hợp nhất pipeline batch và BatchWorkflow tương thích checkpoint cũ. |
 | `polygon_tool/credentials.py` | Giữ mã nguồn; dùng phiên bản hợp nhất hiện tại. |
 | `polygon_tool/input.py` | Giữ parse một/nhiều bài, init_batch và thêm nhận diện bộ mẫu trống. |
-| `polygon_tool/launch_windows.cmd` | Đã gộp vào `start.bat polygon-legacy [auto|check|resume|stop]`. |
+| `polygon_tool/launch_windows.cmd` | Đã gộp vào `python pipeline.py polygon-legacy [auto|check|resume|stop]`. |
 | `polygon_tool/problem_url.py` | Giữ mã nguồn; dùng phiên bản hợp nhất hiện tại. |
 | `polygon_tool/samples.py` | Giữ mã nguồn; dùng phiên bản hợp nhất hiện tại. |
 | `polygon_tool/stop.py` | Giữ mã nguồn; dùng phiên bản hợp nhất hiện tại. |
@@ -42,8 +42,8 @@ Nguồn ban đầu có **144 đường dẫn**. Bảng dưới ghi cách giữ h
 | `requirements-browser.txt` | Giữ danh sách thư viện browser fallback. |
 | `requirements-gemini.txt` | Dẫn tới requirements.txt để tránh lệch phiên bản. |
 | `requirements.txt` | Hợp nhất thư viện cho luồng chung. |
-| `start.bat` | Launcher duy nhất: menu Start/Stop. Start dừng lượt cũ, dọn checkpoint và chạy mới. |
-| `start_check.bat` | Đã gộp vào `start.bat polygon-legacy check`; kiểm tra ảnh dùng `start.bat check`. |
-| `start_gemini.bat` | Đã gộp vào `start.bat gemini` hoặc mục 5 của menu. |
-| `start_resume.bat` | Đã gộp vào `start.bat resume` hoặc mục 3 của menu. |
-| `stop.bat` | Đã gộp vào `start.bat stop` hoặc mục 2; Stop/reset Polygon cũ nằm ở mục R. |
+| `start.bat` | Launcher Windows duy nhất: tự dừng lượt cũ, xóa checkpoint và chạy mới toàn bộ luồng; không có menu. |
+| `start_check.bat` | Đã gộp vào `python pipeline.py polygon-legacy check`; kiểm tra ảnh dùng `python pipeline.py check`. |
+| `start_gemini.bat` | Đã gộp vào `python pipeline.py gemini`. |
+| `start_resume.bat` | Đã gộp vào `python pipeline.py resume`. |
+| `stop.bat` | Dừng lượt cũ tự động khi mở `start.bat`; dừng riêng qua `python pipeline.py stop`, hoặc `python pipeline.py polygon-legacy stop` cho chế độ Polygon cũ. |

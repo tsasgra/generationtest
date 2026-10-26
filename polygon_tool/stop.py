@@ -126,7 +126,7 @@ def reset_checkpoint(directory: Path) -> None:
 
 def main() -> int:
     if os.name != 'nt':
-        print('start.bat polygon-legacy stop chỉ dùng trên Windows.', file=sys.stderr)
+        print('python pipeline.py polygon-legacy stop chỉ dùng trên Windows.', file=sys.stderr)
         return 1
     try:
         stopped, failed = stop_uploads()
@@ -145,10 +145,10 @@ def main() -> int:
         reset_checkpoint(REPOSITORY_DIR)
     except (OSError, WorkflowError) as exc:
         print(f'Chưa xóa hết checkpoint/kết quả cũ: {exc}', file=sys.stderr)
-        print('Đóng uploader rồi chạy start.bat polygon-legacy stop lại trước khi chạy bài mới.', file=sys.stderr)
+        print('Đóng uploader rồi chạy python pipeline.py polygon-legacy stop lại trước khi chạy bài mới.', file=sys.stderr)
         return 1
     print('Đã xóa checkpoint và kết quả cục bộ của lần chạy trước.')
-    print('Sửa nội dung trong problem, rồi chạy start.bat polygon-legacy auto để bắt đầu bài mới.')
+    print('Sửa nội dung trong problem, rồi chạy python pipeline.py polygon-legacy auto để bắt đầu bài mới.')
     print('Dùng tên định danh mới trong name problem.txt của từng bài nếu tên cũ đã có trên Polygon.')
     print('Bài đã tải và tác vụ Polygon đã nhận vẫn ở trên máy chủ.')
     return 0

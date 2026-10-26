@@ -100,17 +100,13 @@ def path_key(value) -> str:
 
 def is_uploader(process: dict) -> bool:
     arguments = python_arguments(process)
-    if arguments[:2] == ["-m", "gemini_tool.cli"]:
+    if arguments[:2] in (["-m", "gemini_tool.cli"], ["-m", "pipeline"]):
         return True
-    if arguments[:2] == ["-m", "pipeline"]:
-        return arguments[2:3] != ["menu"] or len(arguments) > 3
     if not arguments:
         return False
     script = PureWindowsPath(arguments[0]).name.casefold()
-    if script == "pipeline.py":
-        # A menu is a controller, not an uploader; keep it available for Stop.
-        return arguments[1:2] != ["menu"] or len(arguments) > 2
-    return script == "gemini_upload.py"
+    # Include menus/workers left open by older versions of the launcher.
+    return script in {"pipeline.py", "gemini_upload.py"}
 
 
 def is_tool_process(process: dict, directory: Path) -> bool:
@@ -327,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Đã hoàn tất Stop; không còn tiến trình của công cụ (dừng cưỡng bức {stopped} tiến trình gốc).")
     print(f"Đã dọn {removed} mục dữ liệu Gemini tạm: kết nối, tab khôi phục, bản nháp, cache và ảnh tạm.")
     print("Giữ ảnh gốc, đăng nhập, nội dung problem, checkpoint Polygon và report.txt.")
-    print("Dùng start.bat resume để tiếp tục bài đang dở và các bài còn lại; start.bat tạo lượt mới.")
+    print("Dùng python pipeline.py resume để tiếp tục bài đang dở và các bài còn lại; start.bat tạo lượt mới.")
     print("Tin nhắn Gemini và tác vụ Polygon đã nhận vẫn tồn tại trên máy chủ.")
     return 0
 
