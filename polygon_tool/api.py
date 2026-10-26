@@ -49,7 +49,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class PolygonAPI:
     def __init__(self, key: str, secret: str, timeout: float = 60,
-                 retries: int = 3, interval: float = 1.0):
+                 retries: int = 3, interval: float = 1.0, *, request_gate=None):
         if not isinstance(key, str) or not key or not isinstance(secret, str) or not secret:
             raise ValueError("Cần POLYGON_API_KEY và POLYGON_API_SECRET.")
         if not math.isfinite(timeout) or timeout <= 0:
@@ -63,6 +63,7 @@ class PolygonAPI:
         self.timeout = timeout
         self.retries = retries
         self.interval = interval
+        self._request_gate = request_gate
         self._last_request = None
         self._opener = urllib.request.build_opener(_NoRedirect())
 
@@ -112,6 +113,9 @@ class PolygonAPI:
         return values
 
     def _throttle(self) -> None:
+        if self._request_gate is not None:
+            self._request_gate()
+            return
         if self._last_request is not None:
             delay = self.interval - (time.monotonic() - self._last_request)
             if delay > 0:

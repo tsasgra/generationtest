@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
 import sys
 import tempfile
@@ -15,15 +14,10 @@ from gemini_tool.native import find_system_browser
 from gemini_tool.parts import DEFAULT_PROMPT
 from gemini_tool.state import ordinary_directory, remember_profile
 from gemini_tool.stop import reset_run
+from polygon_tool.cli import positive as positive_number
+from polygon_tool.input import MAX_PROBLEMS, numbered_directories
 
-ROOT = Path(__file__).resolve().parent
-
-
-def positive_number(value: str) -> float:
-    number = float(value)
-    if not math.isfinite(number) or number <= 0:
-        raise argparse.ArgumentTypeError("Giá trị phải là số hữu hạn lớn hơn 0.")
-    return number
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def numbered_folders(root: Path) -> list[Path]:
@@ -31,9 +25,9 @@ def numbered_folders(root: Path) -> list[Path]:
     parent.mkdir(exist_ok=True)
     if not ordinary_directory(parent):
         raise ImageInputError(f"Thư mục ảnh phải là thư mục thật, không phải liên kết: {parent}")
-    folders = [parent / f"img{number}" for number in range(1, 11)]
+    existing = numbered_directories(parent, 'img')
+    folders = [existing.get(number, parent / f"img{number}") for number in range(1, MAX_PROBLEMS + 1)]
     for folder in folders:
-        check_stop()
         folder.mkdir(exist_ok=True)
         if not ordinary_directory(folder):
             raise ImageInputError(f"Thư mục ảnh phải là thư mục thật, không phải liên kết: {folder}")

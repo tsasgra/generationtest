@@ -100,8 +100,9 @@ def path_key(value) -> str:
 
 def is_uploader(process: dict) -> bool:
     arguments = python_arguments(process)
-    return bool(arguments and PureWindowsPath(arguments[0]).name.casefold()
-                in {"gemini_upload.py", "pipeline.py"})
+    return (arguments[:2] in (["-m", "gemini_tool.cli"], ["-m", "pipeline"])
+            or bool(arguments and PureWindowsPath(arguments[0]).name.casefold()
+                    in {"gemini_upload.py", "pipeline.py"}))
 
 
 def is_tool_process(process: dict, directory: Path) -> bool:
@@ -110,7 +111,8 @@ def is_tool_process(process: dict, directory: Path) -> bool:
     arguments = python_arguments(process)
     if arguments and PureWindowsPath(arguments[0]).name.casefold() in {"polygon_batch.py", "polygon_upload.py", "pipeline_launch.py"}:
         return True
-    if arguments[:2] in (["-m", "gemini_tool.launch"], ["-m", "pipeline_launch"]):
+    if arguments[:2] in (["-m", "gemini_tool.launch"], ["-m", "pipeline_launch"],
+                        ["-m", "polygon_tool.batch"], ["-m", "polygon_tool.cli"]):
         return True
     if arguments[:2] == ["-m", "venv"]:
         return len(arguments) == 3 and path_key(arguments[2]) == path_key(directory / ".venv-gemini")
@@ -317,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Đã hoàn tất Stop; không còn tiến trình của công cụ (dừng cưỡng bức {stopped} tiến trình gốc).")
     print(f"Đã dọn {removed} mục dữ liệu Gemini tạm: kết nối, tab khôi phục, bản nháp, cache và ảnh tạm.")
     print("Giữ ảnh gốc, đăng nhập, nội dung problem, checkpoint Polygon và report.txt.")
-    print("Dùng start_resume.bat để tiếp tục Polygon; start.bat xóa trạng thái và nội dung cũ để chạy lượt mới.")
+    print("Dùng start.bat resume để tiếp tục Polygon; start.bat xóa trạng thái và nội dung cũ để chạy lượt mới.")
     print("Tin nhắn Gemini và tác vụ Polygon đã nhận vẫn tồn tại trên máy chủ.")
     return 0
 

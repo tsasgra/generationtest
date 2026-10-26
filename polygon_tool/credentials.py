@@ -43,5 +43,5 @@ def load_credentials(path: Path, environ: Mapping[str, str] | None = None) -> tu
     values = {name: values[name] or file_values.get(name, '') for name in NAMES}
     if not all(values.values()):
         raise ValueError('Thiếu POLYGON_API_KEY/POLYGON_API_SECRET. Điền file .env '
-                         'cạnh polygon_upload.py hoặc đặt biến môi trường.')
+                         'cạnh pipeline.py hoặc đặt biến môi trường.')
     return values[NAMES[0]], values[NAMES[1]]

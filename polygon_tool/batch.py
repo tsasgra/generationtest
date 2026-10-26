@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload problem/problem1..problem10 concurrently and collect Polygon links."""
+"""Upload up to ten problem folders concurrently and collect Polygon links."""
 from __future__ import annotations
 
 import argparse
@@ -7,6 +7,7 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 import json
 import math
 import os
+import re
 from pathlib import Path
 from threading import Event, Lock
 import sys
@@ -17,20 +18,20 @@ from gemini_tool.control import (StopRequested, cancellation_scope, check_stop,
 from polygon_tool.api import PolygonAPI
 from polygon_tool.credentials import load_credentials
 from polygon_tool.image_refs import has_image_reference
-from polygon_tool.input import parse_problem
+from polygon_tool.input import MAX_PROBLEMS, discover_problems, parse_batch
 from polygon_tool.problem_url import resolve_problem_url, validate_problem_url
 from polygon_tool.workflow import Workflow, atomic_json, digest, state_lock
-from polygon_upload import indices, nonnegative_int, positive, validate_options
+from polygon_tool.cli import indices, nonnegative_int, positive, validate_options
 
-ROOT = Path(__file__).resolve().parent
-COUNT = 10
+ROOT = Path(__file__).resolve().parent.parent
+COUNT = MAX_PROBLEMS
 DEFAULT_STATE = ROOT / '.pipeline-state' / 'polygon'
 _SERVER_OPTIONS = ('timeLimit', 'memoryLimit', 'inputFile', 'outputFile',
                    'source_type', 'sample_indices')
 
 
 class BatchError(RuntimeError):
-    """The batch has not completed all ten problems; its checkpoints are intact."""
+    """The batch is incomplete; its checkpoints are intact."""
 
 
 class _RequestGate:
@@ -46,20 +47,6 @@ class _RequestGate:
             if self.last is not None:
                 sleep(max(0, self.interval - (time.monotonic() - self.last)))
             self.last = time.monotonic()
-
-
-class _BatchAPI(PolygonAPI):
-    def __init__(self, *args, gate: _RequestGate, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.gate = gate
-
-    def _throttle(self):
-        self.gate.wait()
-
-
-def discover_problems(directory: Path) -> list[Path]:
-    """The numeric suffix is the problem order, including problem10 last."""
-    return [Path(directory) / f'problem{number}' for number in range(1, COUNT + 1)]
 
 
 def _options(overrides: dict | None = None) -> dict:
@@ -91,25 +78,21 @@ def _options(overrides: dict | None = None) -> dict:
 
 
 def preflight(problem_dirs: list[Path]) -> list[dict]:
-    if len(problem_dirs) != COUNT:
-        raise ValueError(f'Cần đúng {COUNT} thư mục bài; đã nhận {len(problem_dirs)}.')
+    if not 1 <= len(problem_dirs) <= COUNT:
+        raise ValueError(f'Cần từ 1 đến {COUNT} thư mục bài; đã nhận {len(problem_dirs)}.')
     paths = [Path(path).resolve() for path in problem_dirs]
-    if len(set(paths)) != COUNT:
+    if len(set(paths)) != len(paths):
         raise ValueError('Các thư mục bài không được trùng nhau.')
     entries = []
-    for number, path in enumerate(paths, 1):
-        if not path.is_dir():
-            raise ValueError(f'Bài {number}: thiếu thư mục {path}.')
-        try:
-            parts = parse_problem(path)
-        except (ValueError, OSError) as exc:
-            raise ValueError(f'Bài {number} ({path.name}): {exc}') from exc
+    for path, parts in zip(paths, parse_batch(paths)):
+        match = re.fullmatch(r'problem(?:([1-9][0-9]*)|\(([1-9][0-9]*)\))', path.name)
+        if match is None or not 1 <= (number := int(match[1] or match[2])) <= COUNT:
+            raise ValueError(f'Tên thư mục bài không hợp lệ: {path.name}.')
         entries.append({'number': number, 'path': str(path),
                         'name': parts['name problem'], 'digest': digest(parts), 'parts': parts})
-    names = [entry['name'] for entry in entries]
-    if len(set(names)) != COUNT:
-        raise ValueError('Mười bài phải có name problem khác nhau để không tạo trùng bài Polygon.')
-    return entries
+    if len({entry['number'] for entry in entries}) != len(entries):
+        raise ValueError('Các bài không được trùng số thứ tự.')
+    return sorted(entries, key=lambda entry: entry['number'])
 
 
 def _validate_paths(entries: list[dict], state_dir: Path, output_dir: Path, report: Path) -> None:
@@ -135,7 +118,7 @@ def _validate_paths(entries: list[dict], state_dir: Path, output_dir: Path, repo
         raise ValueError('Đường dẫn report.txt đang là thư mục.')
     if any(parent.exists() and not parent.is_dir() for parent in report.parents):
         raise ValueError('Thư mục chứa report.txt đi qua một file.')
-    for number in range(1, COUNT + 1):
+    for number in (entry['number'] for entry in entries):
         destination = output_dir / f'problem{number}'
         if destination.exists() and not destination.is_dir():
             raise ValueError(f'Đầu ra bài {number} phải là thư mục: {destination}.')
@@ -143,8 +126,8 @@ def _validate_paths(entries: list[dict], state_dir: Path, output_dir: Path, repo
 
 def _validate_saved_outcomes(manifest: dict) -> list[dict]:
     outcomes = manifest.get('outcomes')
-    if not isinstance(outcomes, list) or len(outcomes) != COUNT:
-        raise BatchError('Checkpoint lô thiếu trạng thái của đủ 10 bài; không tự tạo lại bài.')
+    if not isinstance(outcomes, list) or len(outcomes) != len(manifest['inputs']):
+        raise BatchError('Checkpoint lô thiếu trạng thái bài; không tự tạo lại bài.')
     for outcome in outcomes:
         if (not isinstance(outcome, dict) or
                 outcome.get('status') not in ('pending', 'complete', 'failed', 'stopped') or
@@ -171,7 +154,7 @@ def _reject_duplicate_results(outcomes: list[dict]) -> None:
 def _write_report(path: Path, entries: list[dict], outcomes: list[dict]) -> None:
     """Atomic, ordered report; pending/failed rows are never presented as links."""
     complete = sum(item['status'] == 'complete' for item in outcomes)
-    lines = [f'Polygon: {complete}/{COUNT} bài hoàn tất', '']
+    lines = [f'Polygon: {complete}/{len(entries)} bài hoàn tất', '']
     for entry, outcome in zip(entries, outcomes):
         prefix = f"{entry['number']:02d}. {entry['name']}"
         if outcome['status'] == 'complete':
@@ -199,7 +182,7 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                  output_dir: Path = ROOT / 'polygon_results',
                  report_path: Path = ROOT / 'report.txt', options: dict | None = None,
                  workers: int = COUNT, resume: bool = False, dry_run: bool = False) -> list[dict]:
-    """Preflight ten inputs, run isolated workflows, and return results in input order.
+    """Preflight inputs, run isolated workflows, and return results in numeric order.
 
     Fresh runs never adopt an existing checkpoint. Resume uses the exact saved
     input order and digests. A regular item failure does not interrupt other jobs;
@@ -246,7 +229,7 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
             manifest = {'version': 1, 'inputs': input_manifest,
                         'output_dir': str(output_dir), 'report_path': str(report_path)}
 
-        # Credentials are loaded only after all ten local inputs and resume checks pass.
+        # Credentials are loaded only after all local inputs and resume checks pass.
         key, secret = load_credentials(ROOT / '.env')
         outcomes = [{'status': 'pending', 'started': (state_dir / f"{entry['number']:02d}.json").is_file()}
                     for entry in entries]
@@ -258,7 +241,7 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
 
         def log(number: int, message: str):
             with log_lock:
-                print(f'[Polygon {number:02d}/10] {message}', file=sys.stderr, flush=True)
+                print(f'[Polygon problem{number}] {message}', file=sys.stderr, flush=True)
 
         def resolve_url(*args, **kwargs):
             # Browser fallbacks share a profile and must not open it concurrently.
@@ -273,8 +256,8 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                 check_stop()
                 number = entry['number']
                 path = state_dir / f'{number:02d}.json'
-                api = _BatchAPI(key, secret, timeout=current_options['request_timeout'],
-                                retries=current_options['retries'], interval=0, gate=gate)
+                api = PolygonAPI(key, secret, timeout=current_options['request_timeout'],
+                                 retries=current_options['retries'], interval=0, request_gate=gate.wait)
                 item_options = {**current_options, 'input_path': entry['path'],
                                 'output_dir': str(output_dir / f'problem{number}')}
                 try:
@@ -286,6 +269,9 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                             for name in _SERVER_OPTIONS:
                                 if saved.get('options', {}).get(name) != item_options.get(name):
                                     raise BatchError(f'Checkpoint bài khác tùy chọn {name}.')
+                            # Retain explicit problem/package IDs selected by a
+                            # single-problem recovery, while refreshing transport.
+                            item_options = {**saved.get('options', {}), **item_options}
                         workflow = Workflow(api, path, entry['parts'], item_options,
                                             log=lambda message: log(number, message), sleep=sleep)
                         if workflow.state:
@@ -311,12 +297,12 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
             # before recording its result, a missing item checkpoint blocks
             # resume conservatively. A caught pre-create failure can explicitly
             # record started=False because no remote mutation was attempted.
-            for entry in entries:
+            for index, entry in enumerate(entries):
                 check_stop()
-                outcomes[entry['number'] - 1]['started'] = True
+                outcomes[index]['started'] = True
                 atomic_json(manifest_path, manifest)
                 future = executor.submit(upload, entry)
-                futures[future] = entry['number'] - 1
+                futures[future] = index
             for future in as_completed(futures):
                 index = futures[future]
                 try:
@@ -325,11 +311,11 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                 except (StopRequested, KeyboardInterrupt):
                     interrupted = True
                     cancellation.set()
-                    outcomes[index] = {'status': 'stopped', 'started': (state_dir / f'{index + 1:02d}.json').exists()}
+                    outcomes[index] = {'status': 'stopped', 'started': (state_dir / f"{entries[index]['number']:02d}.json").exists()}
                 except Exception as exc:
                     outcomes[index] = {'status': 'failed', 'error': str(exc),
-                                       'started': (state_dir / f'{index + 1:02d}.json').exists()}
-                    log(index + 1, 'Lỗi: ' + str(exc))
+                                       'started': (state_dir / f"{entries[index]['number']:02d}.json").exists()}
+                    log(entries[index]['number'], 'Lỗi: ' + str(exc))
                 _reject_duplicate_results(outcomes)
                 atomic_json(manifest_path, manifest)
                 _write_report(report_path, entries, outcomes)
@@ -348,10 +334,10 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                 try:
                     outcomes[index] = {'status': 'complete', 'result': future.result(), 'started': True}
                 except (StopRequested, KeyboardInterrupt, CancelledError):
-                    outcomes[index] = {'status': 'stopped', 'started': (state_dir / f'{index + 1:02d}.json').exists()}
+                    outcomes[index] = {'status': 'stopped', 'started': (state_dir / f"{entries[index]['number']:02d}.json").exists()}
                 except Exception as exc:
                     outcomes[index] = {'status': 'failed', 'error': str(exc),
-                                       'started': (state_dir / f'{index + 1:02d}.json').exists()}
+                                       'started': (state_dir / f"{entries[index]['number']:02d}.json").exists()}
             _reject_duplicate_results(outcomes)
             manifest['completed'] = all(item['status'] == 'complete' for item in outcomes)
             atomic_json(manifest_path, manifest)
@@ -360,7 +346,7 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
             raise StopRequested('Đã dừng lô Polygon; checkpoint và report đã được lưu.')
         if not manifest['completed']:
             complete = sum(item['status'] == 'complete' for item in outcomes)
-            raise BatchError(f'Hoàn tất {complete}/10 bài. Xem {report_path}; dùng polygon_batch.py resume để tiếp tục.')
+            raise BatchError(f'Hoàn tất {complete}/{len(entries)} bài. Xem {report_path}; dùng pipeline.py resume để tiếp tục.')
         results = [item['result'] for item in outcomes]
         return results
 
@@ -411,10 +397,10 @@ def main(argv: list[str] | None = None) -> int:
                                    output_dir=args.output_dir, report_path=args.report,
                                    options=options, workers=args.workers,
                                    resume=args.command == 'resume', dry_run=args.dry_run)
-        print(f"Đã kiểm tra {len(results)} bài." if args.dry_run else f'Hoàn tất 10 bài. Link: {args.report}')
+        print(f"Đã kiểm tra {len(results)} bài." if args.dry_run else f'Hoàn tất {len(results)} bài. Link: {args.report}')
         return 0
     except (StopRequested, KeyboardInterrupt):
-        print('Đã dừng. Dùng polygon_batch.py resume để tiếp tục cùng các bài.', file=sys.stderr)
+        print('Đã dừng. Dùng pipeline.py resume để tiếp tục cùng các bài.', file=sys.stderr)
         return 130
     except (OSError, ValueError, RuntimeError) as exc:
         print(f'Chưa hoàn tất: {exc}', file=sys.stderr)

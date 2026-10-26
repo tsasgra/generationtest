@@ -636,7 +636,7 @@ def upload_tasks(tasks: list[UploadTask], *, profile: Path,
         check_stop()
         raise GeminiBrowserError(
             f"Lỗi trình duyệt: {exc}\n"
-            "Đóng cửa sổ của script rồi chạy lại start_gemini.bat. "
+            "Đóng cửa sổ của script rồi chạy lại start.bat gemini. "
             "Không chạy đồng thời công cụ khác dùng cùng --profile. "
             "Ảnh chưa xác nhận được giữ lại."
         ) from exc

@@ -42,7 +42,7 @@ def exclusive_lock(path: Path, timeout: float = 0):
                 if time.monotonic() >= deadline:
                     raise AlreadyRunning(
                         "Công cụ đang chạy hoặc Stop đang dọn dữ liệu. "
-                        "Chờ Stop hoàn tất rồi mở lại start_gemini.bat."
+                        "Chờ Stop hoàn tất rồi mở lại start.bat gemini."
                     ) from exc
                 time.sleep(0.05)
         try:

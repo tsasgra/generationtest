@@ -96,7 +96,7 @@ def _clear_outputs(root: Path, problem_dirs: list[Path], legacy: list[Path]) -> 
 
 
 @contextmanager
-def fresh_run(root: Path, problem_dirs: list[Path], profile: Path):
+def fresh_run(root: Path, problem_dirs: list[Path], profile: Path, *, before_reset=None):
     """Hold the run locks while resetting and processing a fresh batch.
 
     Reset is performed once, before yielding. Completion/failure never erases
@@ -125,10 +125,14 @@ def fresh_run(root: Path, problem_dirs: list[Path], profile: Path):
             with ExitStack() as profile_locks:
                 for candidate in sorted(profiles):
                     profile_locks.enter_context(exclusive_lock(candidate / ".gemini-profile.lock"))
-                print("Đang xóa checkpoint, kết quả cũ và toàn bộ dữ liệu trong problem, kể cả img...", flush=True)
                 # Only orphan connections can remain: active uploaders own the
                 # launch/upload locks above. Preserve the native login profile.
                 reset_run(root, [profile], stop_processes=False)
+                # Validate this run before removing any previous problem data.
+                # A callback can prepare uploads after old runtime cleanup.
+                if before_reset is not None:
+                    before_reset()
+                print("Đang xóa checkpoint, kết quả cũ và toàn bộ dữ liệu trong problem, kể cả img...", flush=True)
                 _clear_outputs(root, problem_dirs, legacy)
             (root / ".gemini-stop-request").unlink(missing_ok=True)
         print("Đã dọn problem và checkpoint; bắt đầu lượt mới. Ảnh đầu vào trong img/ và đăng nhập được giữ lại.", flush=True)

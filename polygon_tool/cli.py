@@ -14,7 +14,7 @@ from polygon_tool.input import init_directory, parse_problem
 from polygon_tool.problem_url import resolve_problem_url
 from polygon_tool.workflow import Workflow, WorkflowError, state_lock
 
-DEFAULT_ENV_FILE = Path(__file__).resolve().parent / '.env'
+DEFAULT_ENV_FILE = Path(__file__).resolve().parent.parent / '.env'
 
 
 def positive(value):
@@ -174,7 +174,7 @@ def main(argv=None):
         step = workflow.step if workflow else 'preflight'
         print(f'Lỗi tại {step}: {message}', file=sys.stderr)
         if getattr(args, 'state', None) and args.state.exists():
-            print(f'Tiếp tục: python polygon_upload.py resume --state "{args.state}"', file=sys.stderr)
+            print(f'Tiếp tục: python pipeline.py polygon-one resume --state "{args.state}"', file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print('Đã dừng. Dùng resume với checkpoint hiện tại; không chạy run lần nữa.', file=sys.stderr)

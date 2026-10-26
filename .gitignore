@@ -12,7 +12,6 @@ problem_url.txt
 problem_url.txt.tmp
 work/
 *.log
-tests/
 examples/
 .venv-gemini/
 .gemini-browser*/

@@ -1,4 +1,4 @@
 @echo off
 setlocal DisableDelayedExpansion
-call "%~dp0launch_pipeline.cmd" stop %*
+call "%~dp0start.bat" stop %*
 exit /b %errorlevel%

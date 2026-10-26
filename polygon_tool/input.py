@@ -19,6 +19,7 @@ PARTS = (
     "solution",
 )
 PART_FILES = {part: f"{part}.txt" for part in PARTS}
+MAX_PROBLEMS = 10
 
 _MARKER = re.compile(r"(?m)^<<<PART: ([^>\r\n]+)>>>(?:\r\n|\n|\r|$)")
 _MARKER_LIKE = re.compile(r"(?m)^[ \t]*<<<PART:[^\r\n]*")
@@ -41,6 +42,58 @@ def init_directory(path: str | Path) -> None:
     directory.mkdir(parents=True, exist_ok=False)
     for filename in PART_FILES.values():
         (directory / filename).touch(exist_ok=False)
+
+
+def numbered_directories(path: str | Path, prefix: str) -> dict[int, Path]:
+    """Read imgN/problemN (also img(N)/problem(N)) in numeric order."""
+    directory = Path(path)
+    if not directory.exists():
+        return {}
+    pattern = re.compile(re.escape(prefix) + r"(?:([1-9][0-9]*)|\(([1-9][0-9]*)\))\Z")
+    numbered = {}
+    for entry in directory.iterdir():
+        if not entry.name.lower().startswith(prefix):
+            continue
+        match = pattern.fullmatch(entry.name)
+        if not match or not entry.is_dir() or entry.is_symlink():
+            raise ValueError(f'Cần thư mục thật có tên {prefix}1…{prefix}10: {entry}.')
+        index = int(match[1] or match[2])
+        if index > MAX_PROBLEMS:
+            raise ValueError(f'Chỉ hỗ trợ {prefix}1 đến {prefix}{MAX_PROBLEMS}.')
+        if index in numbered:
+            raise ValueError(f'Trùng thư mục số {index}: {numbered[index].name}, {entry.name}.')
+        numbered[index] = entry
+    return dict(sorted(numbered.items()))
+
+
+def discover_problems(path: str | Path) -> list[Path]:
+    """Ignore empty slots; partial ten-part sets must still fail preflight."""
+    directory = Path(path)
+    numbered = numbered_directories(directory, 'problem')
+    if not numbered:
+        raise ValueError(f'Không tìm thấy thư mục problem1…problem10 trong {directory}.')
+    if any(entry.suffix.lower() == '.txt' for entry in directory.iterdir()):
+        raise ValueError('Không đặt file .txt trực tiếp trong thư mục chứa nhiều bài; chuyển vào problem1, problem2, ...')
+    return [folder.resolve() for folder in numbered.values()
+            if any(entry.name != 'img' and not entry.name.startswith('.') for entry in folder.iterdir())]
+
+
+def parse_batch(paths: list[Path]) -> list[dict[str, str]]:
+    """Validate every input and duplicate slug before any API request."""
+    problems, names, errors = [], {}, []
+    for path in paths:
+        try:
+            parts = parse_problem(path)
+            slug = parts['name problem']
+            if slug in names:
+                raise ValueError(f'Tên định danh {slug!r} trùng với {names[slug]}.')
+            names[slug] = path.name
+            problems.append(parts)
+        except (OSError, ValueError) as exc:
+            errors.append(f'{path.name}: {exc}')
+    if errors:
+        raise ValueError('Đầu vào chưa hợp lệ:\n' + '\n'.join(errors))
+    return problems
 
 
 def _decode_file(path: Path) -> str:
