@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+from dataclasses import asdict
 import json
 import os
 from pathlib import Path
@@ -13,13 +14,15 @@ import tempfile
 
 from gemini_tool.browser import UploadTask, upload_tasks
 from gemini_tool.control import StopRequested, check_stop, exclusive_lock, start_run
-from gemini_tool.images import ImageInputError, collect_images, prepare_images
+from gemini_tool.images import (ImageInputError, PreparedImage, SourceSnapshot,
+                                archive_uploaded, collect_images, prepare_images)
 from gemini_tool.parts import DEFAULT_PROMPT, validate_output
-from gemini_tool.state import ordinary_directory, remember_profile
+from gemini_tool.state import ordinary_directory, remember_profile, remove_state
 from gemini_tool.cli import numbered_folders
 from polygon_tool.credentials import load_credentials
 from polygon_tool.input import MAX_PROBLEMS, parse_problem
 from polygon_tool.cli import positive as positive_number, validate_options
+from polygon_tool.workflow import atomic_json
 
 ROOT = Path(__file__).resolve().parent
 PROBLEM_COUNT = MAX_PROBLEMS
@@ -91,14 +94,16 @@ def execute(args, *, root: Path = ROOT) -> int:
         held.enter_context(fresh_run(root, problem_dirs, args.profile, resume=resume))
         load_credentials(root / ".env")
         runtime.mkdir(parents=True, exist_ok=True)
-        temporary = held.enter_context(tempfile.TemporaryDirectory(prefix="upload-", dir=runtime))
+        # Keep the exact upload and source identities through Stop/Resume until
+        # Polygon succeeds. Browser runtime cleanup must not discard these.
+        image_state = root / ".pipeline-state" / "images"
         if resume:
             manifest = json.loads((root / ".pipeline-state/polygon/batch.json").read_text(encoding="utf-8"))
             selected.extend(Path(entry["path"]) for entry in manifest["inputs"])
             if any(path not in problem_dirs for path in selected):
                 raise ValueError("Thư mục bài trong checkpoint không thuộc lượt chạy này.")
         else:
-            tasks.extend(prepare_tasks(root, Path(temporary), args.max_file_mb))
+            tasks.extend(prepare_tasks(root, image_state, args.max_file_mb))
             selected.extend(task.output for task in tasks)
         initialize(root)
         remember_profile(runtime, args.profile)
@@ -119,17 +124,54 @@ def execute(args, *, root: Path = ROOT) -> int:
             if task is None:
                 number = problem_dirs.index(output)
                 source = image_dirs[number]
-                images = prepare_images(collect_images(source), Path(temporary) / source.name,
+                images = prepare_images(collect_images(source), image_state / f"img{number + 1}",
                                         args.max_file_mb, skip_invalid=False)
                 if not 1 <= len(images) <= 10 or any(not image.complete for image in images):
                     raise ImageInputError(f"{source.name}: cần 1–10 ảnh một trang của cùng một bài.")
                 task = UploadTask(images, output, output.name)
+            atomic_json(image_state / f"{output.name}.json", {
+                "version": 1, "archived": False,
+                "images": [{"source": str(item.source.relative_to(root)),
+                            "upload": str(item.upload.relative_to(image_state)),
+                            "snapshot": asdict(item.snapshot), "note": item.note,
+                            "complete": item.complete} for item in task.images],
+            })
             print(f"{output.name} — bước 1/3: gửi ảnh và chờ Gemini.", flush=True)
             upload_tasks([task], profile=args.profile, login_timeout=args.login_timeout,
                          upload_timeout=args.upload_timeout, response_timeout=args.response_timeout,
-                         prompt=args.prompt, keep_images=False, workers=1)
+                         prompt=args.prompt, keep_images=True, workers=1)
             parse_problem(output)
             print(f"{output.name} — bước 2/3: đã lưu đủ 10 phần; bước 3/3: tải lên Polygon.", flush=True)
+
+        def finish(output):
+            checkpoint = image_state / f"{output.name}.json"
+            if not checkpoint.is_file():
+                # Older versions archived at Gemini export, before Polygon.
+                # Never collect newly added inputs when resuming such a run.
+                if resume and ordinary_directory(output / "img"):
+                    return
+                raise ImageInputError(f"{output.name}: thiếu checkpoint ảnh; giữ nguyên ảnh trong img/.")
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            if (not isinstance(saved, dict) or saved.get("version") != 1 or
+                    not isinstance(saved.get("images"), list) or not 1 <= len(saved["images"]) <= 10):
+                raise ImageInputError(f"{output.name}: checkpoint ảnh không hợp lệ.")
+            if saved.get("archived") is True:
+                return
+            number = problem_dirs.index(output)
+            uploads = image_state / f"img{number + 1}"
+            images = []
+            for item in saved["images"]:
+                source, upload = root / item["source"], image_state / item["upload"]
+                if (source.parent != image_dirs[number] or upload.parent != uploads or
+                        not ordinary_directory(source.parent) or not ordinary_directory(upload.parent)):
+                    raise ImageInputError(f"{output.name}: đường dẫn ảnh khác checkpoint của bài.")
+                images.append(PreparedImage(source, upload, item["note"],
+                                            SourceSnapshot(**item["snapshot"]), item["complete"]))
+            print(f"{output.name}: Polygon đã hoàn tất; chuyển ảnh vào {output / 'img'}.", flush=True)
+            if archive_uploaded(images, output / "img", allow_missing=True):
+                raise ImageInputError(f"{output.name}: Polygon đã xong nhưng chưa chuyển đủ ảnh; xem lỗi phía trên.")
+            atomic_json(checkpoint, {**saved, "archived": True})
+            remove_state(uploads)
 
         print(f"Xử lý tuần tự {len(selected)} bài; mỗi bài hoàn tất Polygon rồi mới sang bài kế tiếp.", flush=True)
         results = upload_batch(
@@ -138,7 +180,7 @@ def execute(args, *, root: Path = ROOT) -> int:
             options={"timeLimit": args.time_limit, "memoryLimit": args.memory_limit,
                      "source_type": args.source_type, "request_interval": args.request_interval,
                      "poll_timeout": args.poll_timeout},
-            workers=1, resume=resume, prepare=generate,
+            workers=1, resume=resume, prepare=generate, finish=finish,
             pipeline_options={key: str(value) if isinstance(value, Path) else value
                               for key, value in vars(args).items() if key != "command"},
         )

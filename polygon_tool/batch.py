@@ -188,11 +188,12 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                  output_dir: Path = ROOT / 'polygon_results',
                  report_path: Path = ROOT / 'report.txt', options: dict | None = None,
                  workers: int = 1, resume: bool = False, dry_run: bool = False,
-                 prepare=None, pipeline_options: dict | None = None) -> list[dict]:
+                 prepare=None, finish=None, pipeline_options: dict | None = None) -> list[dict]:
     """Finish each problem before starting the next; stop at the first failure.
 
     With prepare, inputs are generated on demand and the complete queue is saved
     before Gemini starts. Existing version-1 Polygon checkpoints remain readable.
+    Finish runs after verified Polygon success, before advancing to the next item.
     The caller owns the lifecycle lock; the standalone CLI acquires it below.
     """
     if type(workers) is not int or workers != 1:
@@ -326,6 +327,8 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                 result = upload(entry)
                 outcomes[index] = {'status': 'complete', 'result': result, 'started': True}
                 _reject_duplicate_results(outcomes)
+                if outcomes[index]['status'] == 'complete' and finish is not None:
+                    finish(Path(entry['path']))
                 save()
                 if outcomes[index]['status'] != 'complete':
                     break

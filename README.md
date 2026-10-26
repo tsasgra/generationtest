@@ -6,7 +6,7 @@ Mỗi lần mở Start đều chạy lại từ đầu, theo luồng:
 
 ```text
 img/imgN/ → gửi ảnh lên Gemini → lấy đủ 10 phần → problem/problemN/
-          → kiểm tra nội dung bài N → hoàn tất Polygon → chuyển sang bài N+1
+          → hoàn tất Polygon → chuyển ảnh vào problem/problemN/img/ → bài N+1
 ```
 
 Hỗ trợ **1–10 bài** mỗi lượt. Mỗi thư mục ảnh chứa 1–10 ảnh của cùng một bài.
@@ -109,9 +109,15 @@ Mỗi bài có đúng 10 file: `name problem.txt`, `name.txt`, `lengend.txt`, `i
 các bài phải có tên khác nhau. Đầu vào Polygon cũng chấp nhận `legend.txt` thay
 cho `lengend.txt`, và thư mục `problem(N)` thay cho `problemN`.
 
-Sau khi xác nhận Gemini đã lưu ảnh và xuất đủ nội dung, ảnh gốc được chuyển vào
-`problem/problemN/img/`. Bản PNG đã chuyển đổi nằm trong `img/uploaded/` khi cần.
-Ảnh chưa hoàn tất vẫn ở đầu vào. Nếu đề tham chiếu ảnh, `report.txt` ghi
+Ảnh gốc chỉ được chuyển từ `img/imgN/` vào `problem/problemN/img/` **sau khi bài N
+hoàn tất trên Polygon**, có package READY và link hợp lệ. Gemini trả đủ nội dung
+chưa làm chuyển ảnh. Bản PNG đã gửi được lưu tại `problem/problemN/img/uploaded/`.
+Nếu Gemini hoặc Polygon lỗi, ảnh của bài đó vẫn ở đầu vào; các bài sau chưa chạy.
+Chuyển ảnh xong mới sang bài tiếp theo. Nếu chuyển ảnh lỗi, luồng dừng và giữ
+checkpoint Polygon; lệnh Python `resume` thử chuyển tiếp mà không tạo/upload lại bài.
+Ảnh mới thêm hoặc ảnh đã thay đổi sau khi gửi không bị chuyển theo lượt cũ.
+Chế độ chạy riêng Gemini vẫn lưu ảnh sau khi nhận đủ nội dung vì không có bước Polygon.
+Nếu đề tham chiếu ảnh, `report.txt` ghi
 `problemN, nameproblem, thiếu ảnh`; bổ sung các ảnh đó vào **Statement Resource Files**
 của Polygon với tên khớp statement.
 

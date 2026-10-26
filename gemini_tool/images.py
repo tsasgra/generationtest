@@ -216,12 +216,14 @@ def _archive_copy(source: Path, destination: Path, expected_digest: str | None =
             return target
 
 
-def archive_uploaded(images: list[PreparedImage], destination: Path, *, save_uploads: bool = True) -> list[str]:
+def archive_uploaded(images: list[PreparedImage], destination: Path, *, save_uploads: bool = True,
+                     allow_missing: bool = False) -> list[str]:
     """Move confirmed originals into the matching problem's img directory.
 
     Source bytes and identity must still match the prepared upload. The source
     is removed only after both the archived original and (when named differently)
     Gemini's actual PNG are verified. Earlier archives are never overwritten.
+    Resume may accept an absent source only if its verified archive exists.
     """
     kept = []
     for item in images:
@@ -233,7 +235,20 @@ def archive_uploaded(images: list[PreparedImage], destination: Path, *, save_upl
                 raise ImageInputError("thiếu thông tin đối chiếu ảnh gốc")
             snapshot = item.snapshot
             expected = (snapshot.device, snapshot.inode, snapshot.size, snapshot.modified_ns)
-            info = item.source.lstat()
+            try:
+                info = item.source.lstat()
+            except FileNotFoundError:
+                if not allow_missing:
+                    raise
+                _archive_directory(Path(destination))
+                renamed = re.compile(rf"{re.escape(item.source.stem)} \([1-9][0-9]*\){re.escape(item.source.suffix)}")
+                candidates = [path for path in Path(destination).iterdir()
+                              if path.name == item.source.name or renamed.fullmatch(path.name)]
+                if not any(path.is_file() and not path.is_symlink() and _file_digest(path) == snapshot.digest
+                           for path in candidates):
+                    raise ImageInputError("ảnh gốc bị thiếu và chưa có bản lưu khớp nội dung")
+                print(f"Ảnh đã được chuyển trước khi dừng: {item.source.name}", flush=True)
+                continue
             if not stat.S_ISREG(info.st_mode) or _identity(info) != expected:
                 raise ImageInputError("file đã thay đổi sau khi chuẩn bị tải")
             target = _archive_copy(item.source, Path(destination), snapshot.digest)

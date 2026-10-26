@@ -36,6 +36,7 @@ class PipelineTests(unittest.TestCase):
         self.root = Path(self.held.enter_context(tempfile.TemporaryDirectory()))
         self.events = []
         self.failures = set()
+        self.inspect_polygon = lambda number: None
         self.held.enter_context(redirect_stdout(io.StringIO()))
         self.held.enter_context(redirect_stderr(io.StringIO()))
         self.held.enter_context(patch.object(control, 'STOP_FILE', self.root / '.gemini-stop-request'))
@@ -56,6 +57,7 @@ class PipelineTests(unittest.TestCase):
 
             def run(self, resolver):
                 number = int(self.parts['name problem'].split('-')[-1])
+                test.inspect_polygon(number)
                 if not self.state:
                     test.events.append(('create', number))
                     self.state = {'version': 1, 'input_digest': digest(self.parts),
@@ -88,9 +90,10 @@ class PipelineTests(unittest.TestCase):
     def gemini(self, tasks, **options):
         for task in tasks:
             number = int(task.label.removeprefix('problem'))
-            # Real response parsing, file writes and image archiving.
+            # Real response parsing and writes; honor the browser's move policy.
             write_parts(parts_from_events(response(number)), task.output)
-            self.assertEqual(archive_uploaded(task.images, task.output / 'img'), [])
+            if not options.get('keep_images', False):
+                self.assertEqual(archive_uploaded(task.images, task.output / 'img'), [])
             self.events.append(('export', number))
 
     def run_pipeline(self, command='run'):
@@ -126,6 +129,26 @@ class PipelineTests(unittest.TestCase):
                                        for event in ('export', 'create', 'complete')])
         self.assertIn('10/10', (self.root / 'report.txt').read_text())
 
+    def test_images_move_after_polygon_success_before_next_gemini(self):
+        self.images(1, 2)
+
+        def inspect(number):
+            self.assertTrue((self.root / f'img/img{number}/page.png').is_file())
+            self.assertFalse((self.root / f'problem/problem{number}/img').exists())
+
+        def archive(images, destination, **options):
+            number = int(destination.parent.name.removeprefix('problem'))
+            self.assertEqual(self.events[-1], ('complete', number))
+            result = archive_uploaded(images, destination, **options)
+            self.events.append(('archive', number))
+            return result
+
+        self.inspect_polygon = inspect
+        with patch.object(pipeline, 'archive_uploaded', side_effect=archive):
+            self.assertEqual(self.run_pipeline(), 0)
+        self.assertEqual(self.events, [(event, number) for number in (1, 2)
+                                       for event in ('export', 'create', 'complete', 'archive')])
+
     def test_pipeline_polygon_failure_blocks_next_gemini_and_resume_finishes_queue(self):
         self.images(1, 2, 10)
         self.failures.add(2)
@@ -133,6 +156,11 @@ class PipelineTests(unittest.TestCase):
             self.run_pipeline()
         self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1),
                                        ('export', 2), ('create', 2)])
+        self.assertFalse((self.root / 'img/img1/page.png').exists())
+        self.assertTrue((self.root / 'problem/problem1/img/page.png').is_file())
+        self.assertTrue((self.root / 'img/img2/page.png').is_file())
+        self.assertFalse((self.root / 'problem/problem2/img').exists())
+        sent = next((self.root / '.pipeline-state/images/img2').glob('*.png')).read_bytes()
         self.assertTrue((self.root / 'img/img10/page.png').exists())
         manifest = json.loads((self.root / '.pipeline-state/polygon/batch.json').read_text())
         self.assertEqual([row['status'] for row in manifest['outcomes']], ['complete', 'failed', 'pending'])
@@ -145,6 +173,98 @@ class PipelineTests(unittest.TestCase):
                                        ('export', 10), ('create', 10), ('complete', 10)])
         self.assertIn('3/3', (self.root / 'report.txt').read_text())
         self.assertEqual(self.remote.call_count, 3)
+        for number in (1, 2, 10):
+            self.assertFalse((self.root / f'img/img{number}/page.png').exists())
+            self.assertTrue((self.root / f'problem/problem{number}/img/page.png').is_file())
+        self.assertEqual(next((self.root / 'problem/problem2/img/uploaded').glob('*.png')).read_bytes(), sent)
+
+    def test_resume_retries_image_move_without_repeating_remote_work(self):
+        self.images(1, 2)
+        with patch.object(pipeline, 'archive_uploaded', return_value=['file is busy']):
+            with self.assertRaisesRegex(batch.BatchError, 'chưa chuyển đủ ảnh'):
+                self.run_pipeline()
+        self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1)])
+        self.assertTrue((self.root / 'img/img1/page.png').is_file())
+        self.assertTrue((self.root / 'img/img2/page.png').is_file())
+        self.assertEqual(self.run_pipeline('resume'), 0)
+        self.assertEqual(self.events, [(event, number) for number in (1, 2)
+                                       for event in ('export', 'create', 'complete')])
+        self.assertFalse((self.root / 'img/img1/page.png').exists())
+        self.assertTrue((self.root / 'problem/problem1/img/page.png').is_file())
+
+    def test_resume_recovers_stop_during_image_move_and_keeps_new_inputs(self):
+        self.images(1, 2)
+        first = self.root / 'img/img1/page.png'
+        second = first.with_name('page2.png')
+        second.write_bytes(first.read_bytes())
+
+        def archive_then_stop(images, destination, **options):
+            self.assertEqual(archive_uploaded(images[:1], destination, **options), [])
+            raise control.StopRequested('between image moves')
+
+        with patch.object(pipeline, 'archive_uploaded', side_effect=archive_then_stop):
+            with self.assertRaises(control.StopRequested):
+                self.run_pipeline()
+        self.assertFalse(first.exists())
+        self.assertTrue(second.exists())
+        added = first.with_name('new.png')
+        added.write_bytes(second.read_bytes())
+        self.assertEqual(self.run_pipeline('resume'), 0)
+        self.assertTrue(added.exists())
+        self.assertFalse(second.exists())
+        self.assertEqual(self.events, [(event, number) for number in (1, 2)
+                                       for event in ('export', 'create', 'complete')])
+        self.images(1)  # New input with the old filename must also stay put.
+        self.assertEqual(self.run_pipeline('resume'), 0)
+        self.assertTrue(first.exists())
+        self.assertTrue(added.exists())
+
+    def test_changed_source_is_preserved_after_polygon_success(self):
+        self.images(1, 2)
+        source = self.root / 'img/img1/page.png'
+
+        def change(number):
+            source.write_bytes(b'user replaced this image')
+
+        self.inspect_polygon = change
+        with self.assertRaisesRegex(batch.BatchError, 'chưa chuyển đủ ảnh'):
+            self.run_pipeline()
+        self.assertEqual(source.read_bytes(), b'user replaced this image')
+        self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1)])
+        self.assertTrue((self.root / 'img/img2/page.png').is_file())
+
+    def test_missing_source_without_verified_archive_blocks_next_problem(self):
+        self.images(1, 2)
+
+        def lose_source(number):
+            (self.root / 'img/img1/page.png').unlink()
+            archive = self.root / 'problem/problem1/img'
+            archive.mkdir()
+            (archive / 'page.png').write_bytes(b'unrelated image')
+
+        self.inspect_polygon = lose_source
+        with self.assertRaisesRegex(batch.BatchError, 'chưa chuyển đủ ảnh'):
+            self.run_pipeline()
+        self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1)])
+        self.assertTrue((self.root / 'img/img2/page.png').is_file())
+
+    def test_resume_old_gemini_archive_keeps_new_input_and_finishes_queue(self):
+        self.images(1, 2)
+        self.failures.add(1)
+        self.remote.side_effect = lambda tasks, **options: self.gemini(tasks, **{**options, 'keep_images': False})
+        with self.assertRaises(batch.BatchError):
+            self.run_pipeline()
+        # Simulate a checkpoint produced before deferred image moves existed.
+        pipeline.remove_state(self.root / '.pipeline-state/images')
+        self.images(1)
+        self.failures.clear()
+        self.remote.side_effect = self.gemini
+        self.assertEqual(self.run_pipeline('resume'), 0)
+        self.assertEqual(self.events, [(event, number) for number in (1, 2)
+                                       for event in ('export', 'create', 'complete')])
+        self.assertTrue((self.root / 'img/img1/page.png').is_file())
+        self.assertFalse((self.root / 'img/img2/page.png').exists())
+        self.assertTrue((self.root / 'problem/problem2/img/page.png').is_file())
 
     def test_pipeline_gemini_failure_resumes_without_repeating_completed_problem(self):
         self.images(1, 2, 3)
@@ -250,7 +370,7 @@ class PipelineTests(unittest.TestCase):
             self.run_pipeline()
         self.failures.clear()
         self.events.clear()
-        # Completed exports archive the inputs; the user supplies images again.
+        # Completed Polygon jobs archive inputs; the user supplies images again.
         self.images(1, 2)
         self.assertEqual(self.run_pipeline(), 0)
         self.assertEqual(self.events, [(event, number) for number in (1, 2)
