@@ -6,7 +6,10 @@ venv/
 .polygon-browser/
 run_state*.json
 run_state*.json.*
+run_state*.problems/
+results/
 result.json
+result.json.tmp
 problem_url.txt
 problem_url.txt.tmp
 work/

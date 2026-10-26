@@ -19,6 +19,8 @@ PARTS = (
     "solution",
 )
 PART_FILES = {part: f"{part}.txt" for part in PARTS}
+MAX_PROBLEMS = 10
+_PROBLEM_FOLDER = re.compile(r"problem(?:([1-9][0-9]*)|\(([1-9][0-9]*)\))\Z")
 
 _MARKER = re.compile(r"(?m)^<<<PART: ([^>\r\n]+)>>>(?:\r\n|\n|\r|$)")
 _MARKER_LIKE = re.compile(r"(?m)^[ \t]*<<<PART:[^\r\n]*")
@@ -41,6 +43,62 @@ def init_directory(path: str | Path) -> None:
     directory.mkdir(parents=True, exist_ok=False)
     for filename in PART_FILES.values():
         (directory / filename).touch(exist_ok=False)
+
+
+def init_batch(path: str | Path, count: int = MAX_PROBLEMS) -> None:
+    """Create numbered, empty input sets without overwriting an existing root."""
+    if not 1 <= count <= MAX_PROBLEMS:
+        raise ValueError('Số bài phải từ 1 đến 10.')
+    directory = Path(path)
+    directory.mkdir(parents=True, exist_ok=False)
+    for index in range(1, count + 1):
+        init_directory(directory / f'problem{index}')
+
+
+def discover_problems(path: str | Path) -> list[Path] | None:
+    """None means a legacy single input; numbered children mean a batch."""
+    directory = Path(path)
+    if not directory.is_dir():
+        return None
+    numbered = {}
+    for entry in directory.iterdir():
+        if not entry.is_dir():
+            continue
+        match = _PROBLEM_FOLDER.fullmatch(entry.name)
+        if match:
+            index = int(match[1] or match[2])
+            if index > MAX_PROBLEMS:
+                raise ValueError('Chỉ hỗ trợ problem1 đến problem10 (hoặc problem(1) đến problem(10)).')
+            if index in numbered:
+                raise ValueError(f'Trùng thư mục bài số {index}: {numbered[index].name}, {entry.name}.')
+            numbered[index] = entry
+        elif entry.name.lower().startswith('problem'):
+            raise ValueError(f'Tên thư mục bài không hợp lệ: {entry.name}. Dùng problem1 đến problem10.')
+    if not numbered:
+        return None
+    if any(entry.suffix.lower() == '.txt' for entry in directory.iterdir()):
+        raise ValueError('Không đặt file .txt trực tiếp trong thư mục chứa nhiều bài; chuyển vào problem1, problem2, ...')
+    if sorted(numbered) != list(range(1, len(numbered) + 1)):
+        raise ValueError('Số thứ tự thư mục phải liên tục từ problem1 đến problemN (N tối đa 10).')
+    return [numbered[index].resolve() for index in sorted(numbered)]
+
+
+def parse_batch(paths: list[Path]) -> list[dict[str, str]]:
+    """Validate every input and duplicate slug before any API request."""
+    problems, names, errors = [], {}, []
+    for path in paths:
+        try:
+            parts = parse_problem(path)
+            slug = parts['name problem']
+            if slug in names:
+                raise ValueError(f'Tên định danh {slug!r} trùng với {names[slug]}.')
+            names[slug] = path.name
+            problems.append(parts)
+        except (OSError, ValueError) as exc:
+            errors.append(f'{path.name}: {exc}')
+    if errors:
+        raise ValueError('Đầu vào chưa hợp lệ:\n' + '\n'.join(errors))
+    return problems
 
 
 def _decode_file(path: Path) -> str:

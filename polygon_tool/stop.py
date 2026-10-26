@@ -1,6 +1,7 @@
 """Stop Windows uploader process trees and reset the launcher's local run."""
 from __future__ import annotations
 
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path, PureWindowsPath
@@ -87,6 +88,36 @@ def reset_checkpoint(directory: Path) -> None:
     # Even an idle/failed run needs resetting. Do not parse its JSON: a damaged
     # checkpoint must also be removable. The lock prevents deleting active state.
     with state_lock(state):
+        children = directory / 'run_state.problems'
+        results = directory / 'results'
+        folders = [name for index in range(1, 11)
+                   for name in (f'problem{index}', f'problem({index})')]
+        if children.is_symlink() or results.is_symlink():
+            raise WorkflowError('Không xóa checkpoint/kết quả qua thư mục liên kết.')
+        child_states = [children / f'{name}.json' for name in folders
+                        if any((children / f'{name}.json{suffix}').exists()
+                               for suffix in ('', '.tmp', '.lock'))]
+        output_dirs = [results / name for name in folders if (results / name).exists()]
+        if any(path.is_symlink() for path in output_dirs):
+            raise WorkflowError('Không xóa kết quả bài qua thư mục liên kết.')
+        # Acquire ALL child locks before deleting anything, including if a child
+        # was resumed separately from the batch launcher.
+        with ExitStack() as stack:
+            for child in child_states:
+                stack.enter_context(state_lock(child))
+            for child in child_states:
+                child.unlink(missing_ok=True)
+                child.with_name(child.name + '.tmp').unlink(missing_ok=True)
+            for output in output_dirs:
+                for name in ('result.json', 'result.json.tmp', 'problem_url.txt', 'problem_url.txt.tmp'):
+                    (output / name).unlink(missing_ok=True)
+                if not any(output.iterdir()):
+                    output.rmdir()
+        for child in child_states:
+            child.with_name(child.name + '.lock').unlink(missing_ok=True)
+        for folder in (children, results):
+            if folder.exists() and not any(folder.iterdir()):
+                folder.rmdir()
         for name in ('run_state.json.tmp', 'result.json.tmp', 'problem_url.txt.tmp',
                      'result.json', 'problem_url.txt', 'run_state.json'):
             (directory / name).unlink(missing_ok=True)
@@ -119,7 +150,7 @@ def main() -> int:
         return 1
     print('Đã xóa checkpoint và kết quả cục bộ của lần chạy trước.')
     print('Sửa nội dung trong problem, rồi bấm start.bat để bắt đầu bài mới.')
-    print('Dùng tên định danh mới trong problem/name problem.txt nếu tên cũ đã có trên Polygon.')
+    print('Dùng tên định danh mới trong name problem.txt của từng bài nếu tên cũ đã có trên Polygon.')
     print('Bài đã tải và tác vụ Polygon đã nhận vẫn ở trên máy chủ.')
     return 0
 

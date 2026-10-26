@@ -36,13 +36,13 @@ if /i "%~1"=="check" goto check_input
 if /i "%~1"=="resume" goto resume_upload
 if /i not "%~1"=="auto" goto invalid_action
 if exist "run_state.json" goto resume_upload
-echo Đang tải bài mới từ thư mục problem lên Polygon...
+echo Đang tải các bài trong problem lên Polygon (tối đa 10 bài song song)...
 set "POLYGON_UPLOAD_ARGS=run --input problem --state run_state.json"
 goto execute
 
 :resume_upload
 if not exist "run_state.json" goto state_missing
-echo Đang tiếp tục bài trong run_state.json...
+echo Đang tiếp tục các bài chưa xong trong run_state.json...
 set "POLYGON_UPLOAD_ARGS=resume --state run_state.json"
 goto execute
 
