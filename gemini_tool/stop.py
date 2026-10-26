@@ -100,9 +100,17 @@ def path_key(value) -> str:
 
 def is_uploader(process: dict) -> bool:
     arguments = python_arguments(process)
-    return (arguments[:2] in (["-m", "gemini_tool.cli"], ["-m", "pipeline"])
-            or bool(arguments and PureWindowsPath(arguments[0]).name.casefold()
-                    in {"gemini_upload.py", "pipeline.py"}))
+    if arguments[:2] == ["-m", "gemini_tool.cli"]:
+        return True
+    if arguments[:2] == ["-m", "pipeline"]:
+        return arguments[2:3] != ["menu"] or len(arguments) > 3
+    if not arguments:
+        return False
+    script = PureWindowsPath(arguments[0]).name.casefold()
+    if script == "pipeline.py":
+        # A menu is a controller, not an uploader; keep it available for Stop.
+        return arguments[1:2] != ["menu"] or len(arguments) > 2
+    return script == "gemini_upload.py"
 
 
 def is_tool_process(process: dict, directory: Path) -> bool:

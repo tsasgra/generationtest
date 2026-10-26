@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+import sys
 
 from gemini_tool.control import exclusive_lock
 from gemini_tool.state import ordinary_directory, remove_state
-from gemini_tool.stop import profile_roots, reset_run
+from gemini_tool.stop import profile_roots, request_stop, reset_run
 from polygon_tool.workflow import state_lock
 
 
@@ -29,11 +30,11 @@ def _validate(root: Path, problem_dirs: list[Path], profile: Path) -> None:
         raise ValueError("Chỉ dọn đúng problem/problem1 đến problem/problem10 của repository này.")
     for path in (root / "img", root / "problem", *problem_dirs,
                  root / ".pipeline-state", root / "batch_state",
-                 root / "polygon_results", root / ".gemini-runtime"):
+                 root / "polygon_results", root / "results", root / ".gemini-runtime"):
         _ordinary_path(path)
     _ordinary_path(profile)
     for reserved in (root / "img", root / "problem", root / ".pipeline-state",
-                     root / "batch_state", root / "polygon_results", root / ".gemini-runtime",
+                     root / "batch_state", root / "polygon_results", root / "results", root / ".gemini-runtime",
                      root / ".venv-gemini", root / ".venv", root / "polygon_tool", root / "gemini_tool",
                      *(root / name for name in ("report.txt", "report.txt.tmp", "result.json", "result.json.tmp",
                        "problem_url.txt", "problem_url.txt.tmp", ".env", ".pipeline-run.lock",
@@ -89,10 +90,30 @@ def _clear_outputs(root: Path, problem_dirs: list[Path], legacy: list[Path]) -> 
     for path in legacy:
         path.unlink(missing_ok=True)
         path.with_name(path.name + ".tmp").unlink(missing_ok=True)
-    for name in (".pipeline-state", "batch_state", "polygon_results",
+    for name in (".pipeline-state", "batch_state", "polygon_results", "results",
                  "report.txt", "report.txt.tmp", "result.json", "result.json.tmp",
                  "problem_url.txt", "problem_url.txt.tmp"):
         remove_state(root / name)
+
+
+def stop_previous_run(root: Path, profile: Path) -> None:
+    """Windows Start replaces previous workers before setup or lifecycle locks.
+
+    The resetter and its ancestors (including the menu) are protected by Stop.
+    Non-Windows callers retain the cooperative stop/lock behavior of the CLI.
+    """
+    if sys.platform != "win32":
+        return
+    root, profile = Path(root).absolute(), Path(profile).absolute()
+    problem_dirs = [root / "problem" / f"problem{i}" for i in range(1, 11)]
+    for candidate in profile_roots(root, [], [profile]):
+        _validate(root, problem_dirs, candidate)
+    # Let a previous Start unwind image preparation while it owns the reset
+    # lock, then terminate any remaining workers and their browser processes.
+    request_stop(root)
+    with exclusive_lock(root / ".gemini-reset.lock", timeout=30):
+        print("Start: đang dừng tác vụ cũ và dọn tab/kết nối/dữ liệu tạm...", flush=True)
+        reset_run(root, [profile], stop_processes=True)
 
 
 @contextmanager
@@ -107,6 +128,8 @@ def fresh_run(root: Path, problem_dirs: list[Path], profile: Path, *, before_res
     problem_dirs = [Path(path).absolute() for path in problem_dirs]
     profile = Path(profile).absolute()
     _validate(root, problem_dirs, profile)
+    if not resume:
+        stop_previous_run(root, profile)
     legacy = _legacy_states(root)
     profiles = profile_roots(root, [], [profile])
     for candidate in profiles:

@@ -1,4 +1,4 @@
-> Hướng dẫn chế độ Polygon riêng. Dùng start_polygon.bat thay cho start.bat và stop_polygon.bat thay cho stop.bat trong hướng dẫn này; start.bat mặc định chạy luồng đầy đủ. Các checkpoint run_state.json cũ vẫn được hỗ trợ. Xem [README chung](../README.md).
+> Hướng dẫn chế độ Polygon riêng, dùng các lệnh `start.bat polygon-legacy ...` hoặc mục 7/8/R trong menu `start.bat`. Checkpoint `run_state.json` cũ vẫn được hỗ trợ. Xem [README chung](../README.md).
 
 # Polygon Upload — 10 bài cùng lúc
 
@@ -10,20 +10,20 @@ Sau khi cập nhật hoặc tải repository về máy, điền đủ 10 file c�
 
 | File | Chức năng |
 | --- | --- |
-| **`start.bat`** | Upload lần lượt tối đa 10 bài. Nếu có `run_state.json`, tiếp tục các bài chưa xong trong đợt đó; nếu chưa có, tạo đợt mới từ `problem/`. |
-| `start_resume.bat` | Tiếp tục đợt upload trong `run_state.json`, bỏ qua các bài đã hoàn tất. Báo lỗi nếu chưa có checkpoint. |
-| `start_check.bat` | Kiểm tra toàn bộ bài trong `problem/` bằng `--dry-run`, không gọi Polygon. |
-| **`stop.bat`** | Dừng uploader và xóa checkpoint/kết quả cục bộ của lần chạy trước trong thư mục này, để `start.bat` bắt đầu đợt mới. |
+| **`start.bat polygon-legacy auto`** | Upload lần lượt tối đa 10 bài. Nếu có `run_state.json`, tiếp tục các bài chưa xong trong đợt đó; nếu chưa có, tạo đợt mới từ `problem/`. |
+| `start.bat polygon-legacy resume` | Tiếp tục đợt upload trong `run_state.json`, bỏ qua các bài đã hoàn tất. Báo lỗi nếu chưa có checkpoint. |
+| `start.bat polygon-legacy check` | Kiểm tra toàn bộ bài trong `problem/` bằng `--dry-run`, không gọi Polygon. |
+| **`start.bat polygon-legacy stop`** | Dừng uploader và xóa checkpoint/kết quả cục bộ của lần chạy trước trong thư mục này, để `start.bat polygon-legacy auto` bắt đầu đợt mới. |
 
 Các file start tự chuyển về thư mục repository và giữ cửa sổ mở để đọc kết quả/lỗi. Chúng tìm Python **3.10 trở lên** theo thứ tự: `.venv\Scripts\python.exe`, `py -3`, rồi `python`. Nếu máy đã có Python phù hợp, bạn không cần tạo virtual environment hoặc gõ lệnh để chạy phần API. Nếu chưa có, cửa sổ sẽ hướng dẫn cài Python.
 
-Giữ nguyên cấu trúc thư mục, bao gồm `polygon_tool/launch_windows.cmd` dùng chung cho các file start. Khi tiếp tục, script dùng thư mục đầu vào đã lưu trong checkpoint. Nếu muốn chuyển sang đợt mới, bấm **`stop.bat`**, sửa các bộ đầu vào trong `problem/problemN/`, rồi bấm **`start.bat`**. Nếu tên định danh cũ đã tồn tại trên Polygon, điền tên mới trong `name problem.txt` của bài đó. Khi chưa bấm Stop, `start.bat` vẫn tiếp tục đợt trong checkpoint và giữ kết quả các bài đã hoàn tất. Checkpoint một bài từ bản cũ vẫn tiếp tục được. Các tùy chọn nâng cao và trình duyệt lấy link vẫn dùng các lệnh bên dưới.
+Các chế độ này dùng chung file `start.bat`; không còn launcher Start/Stop phụ. Khi tiếp tục, script dùng thư mục đầu vào đã lưu trong checkpoint. Nếu muốn chuyển sang đợt mới, bấm **`start.bat polygon-legacy stop`**, sửa các bộ đầu vào trong `problem/problemN/`, rồi bấm **`start.bat polygon-legacy auto`**. Nếu tên định danh cũ đã tồn tại trên Polygon, điền tên mới trong `name problem.txt` của bài đó. Khi chưa bấm Stop, `start.bat polygon-legacy auto` vẫn tiếp tục đợt trong checkpoint và giữ kết quả các bài đã hoàn tất. Checkpoint một bài từ bản cũ vẫn tiếp tục được. Các tùy chọn nâng cao và trình duyệt lấy link vẫn dùng các lệnh bên dưới.
 
-Để dừng, bấm đúp **`stop.bat`**. Công cụ nhận diện các lệnh Python chạy `polygon_upload.py run`, `resume` hoặc `init` (qua file start hoặc gõ trực tiếp), kiểm tra lại PID/thời điểm tạo tiến trình rồi dừng cả cây tiến trình bằng `taskkill /T /F`, bao gồm trình duyệt do lần chạy đó mở. Các bản sao repository đang chạy uploader cũng thuộc phạm vi dừng. Những chương trình Python khác không bị dừng theo tên chung `python.exe`. Các cửa sổ start đã chạy xong và đang chờ nhấn phím có thể vẫn mở.
+Để dừng và reset chế độ Polygon cũ, chọn R trong menu `start.bat` hoặc chạy `start.bat polygon-legacy stop`. Công cụ nhận diện các lệnh Python chạy `polygon_upload.py run`, `resume` hoặc `init` (qua file start hoặc gõ trực tiếp), kiểm tra lại PID/thời điểm tạo tiến trình rồi dừng cả cây tiến trình bằng `taskkill /T /F`, bao gồm trình duyệt do lần chạy đó mở. Các bản sao repository đang chạy uploader cũng thuộc phạm vi dừng. Những chương trình Python khác không bị dừng theo tên chung `python.exe`. Các cửa sổ start đã chạy xong và đang chờ nhấn phím có thể vẫn mở.
 
-Sau khi dừng tiến trình thành công, `stop.bat` xóa `run_state.json`, `run_state.json.tmp`, `run_state.json.lock`, `result.json`, `result.json.tmp`, `problem_url.txt` và `problem_url.txt.tmp` trong thư mục repository chứa file Stop. Việc xóa vẫn chạy khi uploader đã kết thúc hoặc checkpoint bị hỏng. Nếu không dừng được tiến trình hoặc checkpoint đang bị khóa, công cụ báo lỗi và chưa xóa checkpoint. Với đợt nhiều bài, Stop cũng xóa checkpoint con trong `run_state.problems/` và các file kết quả của từng bài trong `results/problemN/`. Công cụ khóa cả checkpoint tổng và checkpoint con trước khi xóa; không xóa file khác trong các thư mục này. Checkpoint đặt tên riêng bằng `--state`, kết quả ở thư mục khác và checkpoint của bản sao repository khác không nằm trong phạm vi xóa.
+Sau khi dừng tiến trình thành công, `start.bat polygon-legacy stop` xóa `run_state.json`, `run_state.json.tmp`, `run_state.json.lock`, `result.json`, `result.json.tmp`, `problem_url.txt` và `problem_url.txt.tmp` trong thư mục repository chứa file Stop. Việc xóa vẫn chạy khi uploader đã kết thúc hoặc checkpoint bị hỏng. Nếu không dừng được tiến trình hoặc checkpoint đang bị khóa, công cụ báo lỗi và chưa xóa checkpoint. Với đợt nhiều bài, Stop cũng xóa checkpoint con trong `run_state.problems/` và các file kết quả của từng bài trong `results/problemN/`. Công cụ khóa cả checkpoint tổng và checkpoint con trước khi xóa; không xóa file khác trong các thư mục này. Checkpoint đặt tên riêng bằng `--state`, kết quả ở thư mục khác và checkpoint của bản sao repository khác không nằm trong phạm vi xóa.
 
-Stop giữ lại toàn bộ file đầu vào của các bài, `.env` và mã nguồn. Bài đã tải lên Polygon vẫn tồn tại; request hoặc package mà Polygon đã nhận có thể tiếp tục trên máy chủ. Nếu chỉ muốn tạm dừng để tiếp tục cùng bài, dùng **Ctrl+C** trong cửa sổ đang chạy, sau đó dùng `start_resume.bat`. File Stop cần Python 3.10 trở lên và Windows PowerShell có sẵn trên máy, chạy bằng cùng tài khoản/quyền với uploader.
+Stop giữ lại toàn bộ file đầu vào của các bài, `.env` và mã nguồn. Bài đã tải lên Polygon vẫn tồn tại; request hoặc package mà Polygon đã nhận có thể tiếp tục trên máy chủ. Nếu chỉ muốn tạm dừng để tiếp tục cùng bài, dùng **Ctrl+C** trong cửa sổ đang chạy, sau đó dùng `start.bat polygon-legacy resume`. File Stop cần Python 3.10 trở lên và Windows PowerShell có sẵn trên máy, chạy bằng cùng tài khoản/quyền với uploader.
 
 ## Cài đặt trên Windows / PowerShell
 
@@ -73,7 +73,7 @@ problem/
 .\.venv\Scripts\python.exe polygon_upload.py run --input my_batch
 ```
 
-`start_polygon.bat` tự nhận diện cấu trúc nhiều bài và chạy lần lượt theo số thứ tự.
+`start.bat polygon-legacy auto` tự nhận diện cấu trúc nhiều bài và chạy lần lượt theo số thứ tự.
 Bài hiện tại phải hoàn tất package và lấy được link rồi mới bắt đầu bài tiếp theo.
 Một bài lỗi sẽ dừng đợt; Resume tiếp tục từ bài đang dở. `--jobs` chỉ nhận `1`, kể cả
 khi checkpoint cũ từng lưu giá trị lớn hơn. `--request-interval` vẫn điều tiết các request.
@@ -91,7 +91,7 @@ Toàn bộ đầu vào được kiểm tra trước khi gọi API. Thiếu file,
 
 Các file tổng hợp được cập nhật sau mỗi bài. `--url-only` chỉ in các link thành công ra stdout. Nếu có bất kỳ bài lỗi, chương trình trả exit code 1 và giữ kết quả các bài thành công. `--output-dir` đổi nơi lưu cả kết quả tổng lẫn thư mục `results/`; `--state batch_A.json` dùng checkpoint con trong `batch_A.problems/`.
 
-Bấm `start_resume.bat` hoặc chạy `resume --state run_state.json` để tiếp tục các bài chưa xong. Bài hoàn tất được lấy kết quả từ checkpoint, không upload/build lại. Giữ nguyên danh sách thư mục và tên định danh của đợt khi resume. Dùng Ctrl+C để tạm dừng; các request đang gửi có thể cần chờ đến timeout để đóng, còn checkpoint được giữ lại.
+Bấm `start.bat polygon-legacy resume` hoặc chạy `resume --state run_state.json` để tiếp tục các bài chưa xong. Bài hoàn tất được lấy kết quả từ checkpoint, không upload/build lại. Giữ nguyên danh sách thư mục và tên định danh của đợt khi resume. Dùng Ctrl+C để tạm dừng; các request đang gửi có thể cần chờ đến timeout để đóng, còn checkpoint được giữ lại.
 
 Các cờ `--problem-id`, `--package-id`, `--update-input`, `--retry-failed-package` chỉ dùng với checkpoint riêng của một bài, ví dụ:
 
@@ -225,7 +225,7 @@ Nếu đang dở một trong bốn request upload này, `resume` gửi lại và
 
 Các tình huống cần xử lý:
 
-- **Kẹt tại `checker.cpp`, `gen.cpp`, `solution` hoặc `script` do lỗi đọc lại của bản cũ:** cập nhật repository, giữ nguyên bộ đầu vào và `run_state.json`, rồi bấm `start_resume.bat`. Công cụ gửi lại bước đang dở và tiếp tục trên cùng bài, không còn lỗi so sánh byte/nội dung cho bốn phần này.
+- **Kẹt tại `checker.cpp`, `gen.cpp`, `solution` hoặc `script` do lỗi đọc lại của bản cũ:** cập nhật repository, giữ nguyên bộ đầu vào và `run_state.json`, rồi bấm `start.bat polygon-legacy resume`. Công cụ gửi lại bước đang dở và tiếp tục trên cùng bài, không còn lỗi so sánh byte/nội dung cho bốn phần này.
 - **Files đã có `checker.cpp` nhưng Checker vẫn là `None`:** tải file và chọn checker là hai bước riêng. Bản hiện tại chọn checker sau khi API xác nhận tải file thành công. Chạy `resume` với checkpoint cũ để hoàn tất bước còn thiếu. Nếu bạn đã chọn đúng `checker.cpp` trên web, công cụ xác nhận lựa chọn đó. Với checkpoint cũ đang chờ kết quả tải `gen.cpp`, công cụ xử lý request đang chờ trước rồi mới chọn checker.
 - **Không nhận diện được sample:** kiểm tra chỉ số trong Tests rồi chạy `resume --state run_state.json --sample-indices 1,3`. Với resume thông thường, chỉ đổi danh sách sample trước commit.
 - **Hết thời gian poll:** chạy `resume` để chờ tiếp cùng package; có thể tăng `--poll-timeout 1800`.

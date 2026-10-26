@@ -1,9 +1,9 @@
-> Hướng dẫn chế độ Gemini riêng. start_gemini.bat và gemini_upload.py vẫn được hỗ trợ; ảnh đã gửi được lưu trong problem/problemN/img/ thay vì xóa. Xem [README chung](../README.md).
+> Hướng dẫn chế độ Gemini riêng. `start.bat gemini` và `gemini_upload.py` vẫn được hỗ trợ; ảnh đã gửi được lưu trong problem/problemN/img/ thay vì xóa. Xem [README chung](../README.md).
 
 # Xử lý lần lượt 10 bài trong img trên Gemini
 
 Đặt ảnh bài 1 vào **`img/img1/`**, bài 2 vào **`img/img2/`**, ... bài 10 vào **`img/img10/`**,
-rồi chạy **`start_gemini.bat`** một lần. Thư mục **`img/`** nằm cạnh script;
+rồi chạy **`start.bat gemini`** một lần. Thư mục **`img/`** nằm cạnh script;
 10 thư mục con `img1` đến `img10` được tạo lại nếu thiếu. Mỗi thư mục có thể chứa nhiều ảnh của cùng một bài, tối đa **10 ảnh**.
 Script chạy **tối đa 10 bài, mỗi lần một bài**, bỏ qua thư mục trống hoặc không tìm
 thấy ảnh hợp lệ (chỉ có file rỗng, file hỏng hoặc file không phải ảnh). Mỗi bài dùng
@@ -27,7 +27,7 @@ vào các thư mục tương ứng bên trong `img/` trước khi chạy. Kết 
 ## Windows: lần chạy đầu
 
 1. Cài Python **3.10+** và Google Chrome hoặc Microsoft Edge bản cập nhật.
-2. Đặt ảnh từng bài vào `img/img1` đến `img/img10` bên trong thư mục `img`, cạnh `gemini_upload.py`, rồi bấm đúp `start_gemini.bat`.
+2. Đặt ảnh từng bài vào `img/img1` đến `img/img10` bên trong thư mục `img`, cạnh `gemini_upload.py`, rồi mở `start.bat` và chọn mục 5 (Gemini).
    File chạy tự tạo `.venv-gemini` và cài thư viện cần thiết.
 3. Đăng nhập Google trong cửa sổ Chrome/Edge được mở. Script chờ đăng nhập trước khi kết nối tự động.
 4. Khi ô chat sẵn sàng, script bấm **dấu + / Upload & tools → Upload files / Tải tệp lên**,
@@ -55,8 +55,8 @@ dừng phiên cũ, dọn dữ liệu cũ rồi mới chạy phiên mới.
 
 ## Một file Start: tự dừng và dọn trước/sau mỗi lần chạy
 
-Chỉ cần **`start_gemini.bat`**. Chức năng Stop đã được gộp vào bộ khởi động;
-không còn file `stop.bat` riêng trong repository.
+Chỉ cần **`start.bat gemini`**. Chức năng Stop đã được gộp vào bộ khởi động;
+Start và Stop đều nằm trong menu `start.bat`; dùng `start.bat stop` để dừng trực tiếp.
 
 1. Trước khi chạy trên Windows, Start dừng phiên uploader/trình duyệt cũ và dọn
    dữ liệu còn sót, kể cả khi lần trước bị lỗi hoặc bị tắt cưỡng bức.
@@ -81,8 +81,8 @@ chưa xác nhận được, kiểm tra lịch sử Gemini trước khi chạy l�
 Muốn dừng ngay mà không bắt đầu lượt mới, dùng chính file Start:
 
 ```bat
-start_gemini.bat --stop
-start_gemini.bat --stop --profile "D:\GeminiProfile"
+start.bat gemini --stop
+start.bat gemini --stop --profile "D:\GeminiProfile"
 ```
 
 Hoặc nhấn Ctrl+C trong cửa sổ đang chạy. Stop/Ctrl+C hủy các bài đang chạy;
@@ -96,13 +96,13 @@ uploader/profile của công cụ. Nó bảo vệ tiến trình Start hiện t�
 trình `py.exe` cha để không tự tắt khi dọn. Nếu thiếu quyền dừng hoặc không dọn được
 file, script báo lỗi, không báo hoàn tất giả. Trình duyệt Chrome/Edge cá nhân ngoài
 profile riêng không bị đóng theo tên chung. Khi cập nhật, lấy cả thư mục `gemini_tool`
-và file `start_gemini.bat`.
+và file `start.bat gemini`.
 
 ## Trình duyệt từ copy_info_on_gemini
 
 Phần mở trình duyệt được chuyển từ
 [`gemini_export.bat` của nhánh `copy_info_on_gemini`](https://github.com/tsasgra/generationtest/blob/e5ee49144ef20f7d5b02e8aa31b69f8056a0125c/gemini_export.bat).
-Chỉ cần chạy **`start_gemini.bat`**, không cần chọn Python hoặc trình duyệt bằng tham số.
+Chỉ cần chạy **`start.bat gemini`**, không cần chọn Python hoặc trình duyệt bằng tham số.
 
 1. Tìm **Google Chrome đã cài trên máy**, dùng Microsoft Edge nếu không tìm thấy Chrome.
 2. Mở trực tiếp trình duyệt đó bằng `subprocess.Popen`, với profile riêng và cổng
@@ -118,7 +118,7 @@ Không có bước giả mạo user-agent, tắt kiểm tra bảo mật hay đ�
 Nếu Google vẫn chuyển đến trang “Couldn't sign you in”, script báo ngay và giữ ảnh.
 Chưa thể bảo đảm Google chấp nhận đăng nhập trên mọi máy/tài khoản.
 
-Dùng `start_gemini.bat --browser-info` để xem tên, đường dẫn và profile trình duyệt
+Dùng `start.bat gemini --browser-info` để xem tên, đường dẫn và profile trình duyệt
 sẽ dùng; lệnh này không cần ảnh và không mở trình duyệt.
 Các tùy chọn cũ `--polygon-python`, `--login`, `--browser`, `--browser-path`,
 `--cdp-url` không còn dùng. Khi cập nhật từ bản trước, chạy lại BAT không kèm chúng.
@@ -195,7 +195,7 @@ bài 2 xong rồi mới đến bài 10, lưu đúng vào `problem/problem2` và 
 Bộ cũ chỉ được thay khi đã chuẩn bị đủ 10 file mới;
 không ghi dở dang hoặc xóa file lạ trong thư mục đầu ra.
 
-Để dùng một thư mục riêng theo cách cũ, chạy `start_gemini.bat --input THU_MUC_ANH_RIENG`.
+Để dùng một thư mục riêng theo cách cũ, chạy `start.bat gemini --input THU_MUC_ANH_RIENG`.
 Chế độ `--input` chia nhóm theo `--batch-size`: một chat lưu trực tiếp trong
 `problem/`, nhiều chat lưu riêng trong `problem/chat_0001/`, `problem/chat_0002/`, ...
 Khi đã có các thư mục `chat_000N`, những lần sau vẫn dùng cách bố trí đó.
@@ -205,7 +205,7 @@ lưu theo bài; chế độ cũ sẽ báo lỗi nếu phải thay thư mục có
 Mặc định chờ Gemini tối đa **600 giây mỗi chat**. Có thể tăng thời gian:
 
 ```bat
-start_gemini.bat --response-timeout 1800
+start.bat gemini --response-timeout 1800
 ```
 
 Riêng bài hết thời gian được báo lỗi và giữ ảnh gốc cùng bộ `problem` cũ.
@@ -215,7 +215,7 @@ Chế độ Gemini riêng giữ các bộ `problem` hoàn thành qua Start/Stop.
 Mỗi lần chỉ xử lý một bài. `--workers` được giữ để tương thích lệnh cũ và chỉ nhận `1`:
 
 ```powershell
-start_gemini.bat --workers 1
+start.bat gemini --workers 1
 ```
 
 Bài hiện tại lưu đủ 10 phần mới bắt đầu bài tiếp theo; gặp lỗi thì dừng.
@@ -224,10 +224,10 @@ Bài hiện tại lưu đủ 10 phần mới bắt đầu bài tiếp theo; gặ
 ## Tùy chọn thường dùng
 
 ```bat
-start_gemini.bat --dry-run
-start_gemini.bat --prompt "apply polygon-problem-setter skill"
-start_gemini.bat --keep-images
-start_gemini.bat --attach-only
+start.bat gemini --dry-run
+start.bat gemini --prompt "apply polygon-problem-setter skill"
+start.bat gemini --keep-images
+start.bat gemini --attach-only
 ```
 
 `--dry-run` nhận diện và kiểm tra ảnh offline, không mở trình duyệt hoặc xóa ảnh.

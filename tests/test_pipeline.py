@@ -3,6 +3,7 @@ from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import io
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from PIL import Image
 
 import pipeline
+import pipeline_reset
 from gemini_tool import control
 from gemini_tool.images import archive_uploaded, delete_uploaded, prepare_images
 from gemini_tool.parts import parts_from_events, write_parts
@@ -214,6 +216,93 @@ class PipelineTests(unittest.TestCase):
             with self.subTest(arguments=arguments), self.assertRaises(SystemExit) as error:
                 parser.parse_args(arguments)
             self.assertEqual(error.exception.code, 2)
+
+    def test_menu_start_opens_worker_and_stop_stays_available(self):
+        with patch.object(sys, 'platform', 'win32'), \
+                patch('builtins.input', side_effect=['1', '2', '0']), \
+                patch.object(pipeline.subprocess, 'Popen') as launch, \
+                patch.object(pipeline, 'main', return_value=0) as command:
+            self.assertEqual(pipeline.menu(), 0)
+            launch.assert_called_once_with(
+                [sys.executable, '-u', str(pipeline.ROOT / 'pipeline.py'), 'menu-task', 'run'],
+                cwd=pipeline.ROOT, creationflags=0x10)
+            launch.return_value.wait.assert_not_called()
+            command.assert_called_once_with(['stop'])
+
+    def test_menu_forwards_cli_arguments_unchanged(self):
+        with patch.object(pipeline, 'main', return_value=7) as command:
+            self.assertEqual(pipeline.menu(['gemini', '--input', 'a folder']), 7)
+            command.assert_called_once_with(['gemini', '--input', 'a folder'])
+
+    def test_stop_preserves_menu_but_recognizes_its_workers(self):
+        for command in ('python.exe pipeline.py menu', 'python.exe -m pipeline menu'):
+            self.assertFalse(is_tool_process({'Name': 'python.exe', 'CommandLine': command}, self.root))
+        for command in ('python.exe pipeline.py menu-task run',
+                        'python.exe pipeline.py menu run',
+                        'python.exe -m pipeline menu run'):
+            self.assertTrue(is_tool_process({'Name': 'python.exe', 'CommandLine': command}, self.root))
+        self.assertTrue(is_polygon_uploader({'Name': 'python.exe',
+            'CommandLine': 'python.exe pipeline.py menu-task polygon-legacy auto'}))
+
+    def test_start_replaces_previous_worker_before_taking_its_run_lock(self):
+        self.images(1)
+        previous = ExitStack()
+        self.addCleanup(previous.close)
+        previous.enter_context(control.exclusive_lock(self.root / '.pipeline-run.lock'))
+        self.problem(1)
+        (self.root / 'report.txt').write_text('old report')
+        atomic_json(self.root / '.pipeline-state/old.json', {'pending': True})
+        atomic_json(self.root / 'results/problem1/result.json', {'old': True})
+        profile = self.root / '.browser/chrome/Default'
+        profile.mkdir(parents=True)
+        (profile / 'Cookies').write_bytes(b'saved-login')
+        with patch.object(pipeline_reset, 'stop_previous_run', side_effect=lambda *args: previous.close()) as stop:
+            self.assertEqual(self.run_pipeline(), 0)
+            stop.assert_called_once()
+        self.assertFalse((self.root / '.pipeline-state/old.json').exists())
+        self.assertFalse((self.root / 'results').exists())
+        self.assertNotIn('old report', (self.root / 'report.txt').read_text())
+        self.assertEqual((profile / 'Cookies').read_bytes(), b'saved-login')
+        self.assertTrue((self.root / '.env').is_file())
+
+    def test_windows_restart_requests_stop_and_cleans_owned_runtime(self):
+        def reset(root, profiles, *, stop_processes):
+            self.assertTrue((root / '.gemini-stop-request').is_file())
+            self.assertTrue(stop_processes)
+            self.assertEqual(profiles, [self.root / '.browser'])
+        with patch.object(sys, 'platform', 'win32'), \
+                patch.object(pipeline_reset, 'reset_run', side_effect=reset) as reset_run:
+            pipeline_reset.stop_previous_run(self.root, self.root / '.browser')
+            reset_run.assert_called_once()
+
+    def test_failed_stop_does_not_erase_outputs_or_start_new_upload(self):
+        self.images(1)
+        old = self.problem(1)
+        atomic_json(self.root / '.pipeline-state/old.json', {'pending': True})
+        with patch.object(pipeline_reset, 'stop_previous_run', side_effect=RuntimeError('still running')):
+            with self.assertRaisesRegex(RuntimeError, 'still running'):
+                self.run_pipeline()
+        self.assertTrue((old / 'solution.txt').is_file())
+        self.assertTrue((self.root / '.pipeline-state/old.json').is_file())
+        self.remote.assert_not_called()
+
+    def test_start_stops_old_setup_before_dependency_installation(self):
+        calls = []
+        with patch.object(pipeline, 'ROOT', self.root), \
+                patch.object(pipeline_reset, 'stop_previous_run', side_effect=lambda *args: calls.append('stop')), \
+                patch.object(pipeline, '_python_with_dependencies', side_effect=lambda: calls.append('setup') or Path(sys.executable)), \
+                patch.object(pipeline, 'run_pipeline', side_effect=lambda args: calls.append('run') or 0):
+            self.assertEqual(pipeline.main(['run']), 0)
+        self.assertEqual(calls, ['stop', 'setup', 'run'])
+
+    def test_resume_falls_back_to_legacy_checkpoint_without_reset(self):
+        (self.root / 'run_state.json').write_text('{}')
+        with patch.object(pipeline, 'ROOT', self.root), \
+                patch.object(cli, 'legacy_launch', return_value=0) as resume, \
+                patch.object(pipeline_reset, 'stop_previous_run') as stop:
+            self.assertEqual(pipeline.main(['resume']), 0)
+            resume.assert_called_once_with(['resume', '--state', str(self.root / 'run_state.json')])
+            stop.assert_not_called()
 
     def test_single_problem(self):
         self.images(7)

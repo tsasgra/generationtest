@@ -1,6 +1,14 @@
 # Ảnh → Gemini → Polygon
 
-Một lần chạy `start.bat` thực hiện liên tục:
+Chỉ dùng một file **`start.bat`** cho cả Start và Stop. Bấm đúp để mở menu:
+
+- **1 — Start mới:** dừng lượt cũ, dọn checkpoint và dữ liệu chạy cũ, rồi chạy từ đầu.
+- **2 — Stop:** dừng tác vụ hiện tại; menu vẫn mở.
+- **3 — Resume:** chủ động tiếp tục lượt đang dở.
+- Các mục còn lại dùng để kiểm tra dữ liệu hoặc chạy riêng Gemini/Polygon.
+
+Trên Windows, tác vụ mở trong cửa sổ riêng, nên có thể chọn Stop ngay trong menu.
+Chọn Start mới thực hiện liên tục:
 
 ```text
 img/imgN/ → gửi ảnh lên Gemini → lấy đủ 10 phần → problem/problemN/
@@ -29,7 +37,7 @@ Nếu một bài lỗi, luồng dừng tại bài đó; các bài phía sau chư
    POLYGON_API_SECRET=your_api_secret
    ```
 
-5. Bấm đúp **`start.bat`**. Lần đầu, script tự tạo `.venv-gemini` và cài thư viện
+5. Bấm đúp **`start.bat`**, chọn **1 — Start mới**. Lần đầu, script tự tạo `.venv-gemini` và cài thư viện
    trong `requirements.txt`. Đăng nhập Google trực tiếp ở cửa sổ Chrome/Edge được mở;
    những lần sau dùng lại phiên đăng nhập.
 6. Khi hoàn tất, mở **`report.txt`** để lấy link Polygon theo thứ tự bài.
@@ -45,28 +53,30 @@ Các lệnh đều dùng chung `start.bat` hoặc `python pipeline.py`:
 
 | Lệnh | Chức năng |
 | --- | --- |
-| `start.bat` | Chạy toàn bộ luồng từ ảnh đến Polygon |
+| `start.bat` | Mở menu Start/Stop dùng chung |
+| `start.bat run` | Dừng lượt cũ, dọn trạng thái và chạy mới toàn bộ luồng |
 | `start.bat init` | Tạo các thư mục đầu vào/đầu ra, không ghi đè file |
 | `start.bat check` | Kiểm tra ảnh offline, giữ kết quả cũ |
 | `start.bat resume` | Tiếp tục bài đang dở và các bài còn lại; không gửi lại bài đã nhận đủ nội dung |
-| `stop.bat` hoặc `start.bat stop` | Dừng tác vụ, giữ checkpoint và kết quả |
+| `start.bat stop` | Dừng tác vụ, giữ checkpoint và kết quả |
 | `start.bat gemini` | Chỉ gửi ảnh lên Gemini và lưu nội dung vào `problem/` |
 | `start.bat polygon` | Tải các bộ nội dung đã có trong `problem/` lên Polygon |
 | `start.bat polygon-one resume --state .pipeline-state/polygon/02.json` | Khôi phục riêng bài 2 |
 
-Các điểm vào từ hai nhánh vẫn có trong `main`:
+Các chế độ từ hai nhánh vẫn được giữ trong launcher chung:
 
-| File/lệnh cũ | Hành vi sau hợp nhất |
+| Lệnh | Hành vi |
 | --- | --- |
-| `start_gemini.bat`, `python -m gemini_tool.launch` | Chạy riêng Gemini qua bộ khởi động chung |
+| `start.bat gemini`, `python -m gemini_tool.launch` | Chạy riêng Gemini qua bộ khởi động chung |
 | `python gemini_upload.py` | CLI Gemini, giữ các tùy chọn `--input`, `--dry-run`, `--attach-only`, `--keep-images` |
 | `python polygon_upload.py` | CLI Polygon một bài/nhiều bài, hỗ trợ `init --count`, `--jobs`, `--url-only` và checkpoint cũ |
-| `start_polygon.bat` | Chế độ Start của nhánh Polygon: tự chạy mới hoặc tiếp tục `run_state.json` |
-| `start_check.bat` | Kiểm tra nội dung `problem/` offline; `start.bat check` kiểm tra ảnh |
-| `start_resume.bat` | Tiếp tục checkpoint pipeline nếu có; nếu không, tiếp tục `run_state.json` |
-| `stop_polygon.bat`, `python -m polygon_tool.stop` | Stop/reset của nhánh Polygon: dừng uploader riêng và xóa checkpoint/kết quả cũ của chế độ này |
+| `start.bat polygon-legacy auto` | Chế độ Polygon cũ: tự chạy mới hoặc tiếp tục `run_state.json` |
+| `start.bat polygon-legacy check` | Kiểm tra nội dung `problem/` offline; `start.bat check` kiểm tra ảnh |
+| `start.bat resume` | Tiếp tục checkpoint pipeline nếu có; nếu không, tiếp tục `run_state.json` |
+| `start.bat polygon-legacy stop`, `python -m polygon_tool.stop` | Dừng uploader riêng và xóa checkpoint/kết quả của chế độ Polygon cũ |
 
-`stop.bat` vẫn dừng luồng chung và giữ checkpoint để Resume. Chế độ Polygon riêng lưu
+Các file Start/Stop phụ và `polygon_tool/launch_windows.cmd` đã được gộp vào `start.bat`.
+Stop trong menu giữ checkpoint để Resume; chọn Start mới sẽ dọn chúng. Chế độ Polygon riêng lưu
 checkpoint con trong `run_state.problems/`, kết quả trong `results/`, `result.json` và
 `problem_url.txt`. Cả hai định dạng checkpoint đều được giữ, không tự chuyển đổi lẫn nhau.
 Các bộ 10 file mẫu hoàn toàn trống được bỏ qua; bộ chỉ điền một phần sẽ báo lỗi.
@@ -108,11 +118,14 @@ Sau khi xác nhận Gemini đã lưu ảnh và xuất đủ nội dung, ảnh g�
 `problemN, nameproblem, thiếu ảnh`; bổ sung các ảnh đó vào **Statement Resource Files**
 của Polygon với tên khớp statement.
 
-**Start là lượt chạy mới**: sau khi kiểm tra cấu hình API và ảnh thành công, script
-xóa checkpoint, báo cáo, kết quả cũ và toàn bộ `problem/`, kể cả ảnh đã lưu, rồi
-tạo lại thư mục nhận bài. Ảnh trong `img/`, `.env`, thư viện và đăng nhập được giữ lại.
+**Start luôn là lượt chạy mới**. Trên Windows, script tự dừng tiến trình và trình duyệt
+của lượt cũ, kể cả lượt đang chạy hoặc bị gián đoạn khi cài thư viện. Sau khi kiểm tra
+cấu hình API và ảnh thành công, script xóa checkpoint, báo cáo, kết quả cũ và toàn bộ
+`problem/`, kể cả ảnh đã lưu, rồi tạo lại thư mục nhận bài. Tab khôi phục, kết nối và
+dữ liệu tạm được dọn. Ảnh trong `img/`, `.env`, thư viện và đăng nhập được giữ lại.
 Muốn gửi lại ảnh đã chuyển, chép chúng về `img/imgN/` trước khi Start.
 Đầu vào hoặc cấu hình không hợp lệ sẽ không xóa bộ kết quả cũ.
+Reset áp dụng cho dữ liệu cục bộ; chat Gemini và bài Polygon đã tạo vẫn tồn tại trên máy chủ.
 
 Nếu Gemini lỗi hoặc thiếu phần, script dừng trước bước Polygon của bài đó. Các bài
 đã hoàn thành và ảnh của các bài chưa xử lý được giữ lại. Dùng `start.bat resume`
@@ -133,8 +146,8 @@ khôi phục riêng bài theo hướng dẫn lỗi rồi chạy Resume cho cả 
 `pipeline.py` là điểm vào chung, gồm khởi động môi trường và điều phối các giai đoạn.
 `pipeline_reset.py` quản lý reset và khóa phiên chạy. `gemini_tool/` chứa trình duyệt,
 ảnh và bộ đọc phản hồi; `polygon_tool/` chứa API, bộ đọc 10 phần và quy trình tải bài.
-Các file trùng tên được hợp nhất trong cùng module; các launcher cũ gọi lại mã dùng
-chung. `polygon_tool/batch.py` giữ cả bộ xử lý pipeline và bộ đọc checkpoint của CLI
+Các file trùng tên được hợp nhất trong cùng module; chỉ còn một launcher Windows
+`start.bat`. `polygon_tool/batch.py` giữ cả bộ xử lý pipeline và bộ đọc checkpoint của CLI
 Polygon riêng. `requirements-gemini.txt` dùng lại `requirements.txt`, còn
 `requirements-browser.txt` dành cho browser fallback của Polygon.
 

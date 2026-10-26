@@ -258,10 +258,67 @@ def _run_gemini(arguments: list[str]) -> int:
         return subprocess.call([str(python), "-u", "-m", "gemini_tool.cli", *arguments], cwd=ROOT)
 
 
+def menu(arguments: list[str] | None = None) -> int:
+    """One Windows launcher for Start/Stop and all existing standalone modes."""
+    if arguments:
+        return main(arguments)
+    actions = {
+        "1": ("START mới: dừng lượt cũ, xóa checkpoint và chạy lại từ ảnh", ["run"]),
+        "2": ("STOP: dừng tác vụ, giữ kết quả đang có", ["stop"]),
+        "3": ("Tiếp tục lượt đang dở (Resume)", ["resume"]),
+        "4": ("Kiểm tra ảnh", ["check"]),
+        "5": ("Chạy riêng Gemini", ["gemini"]),
+        "6": ("Tải nội dung problem lên Polygon", ["polygon"]),
+        "7": ("Chạy/tiếp tục Polygon theo checkpoint cũ", ["polygon-legacy", "auto"]),
+        "8": ("Kiểm tra nội dung problem", ["polygon-legacy", "check"]),
+        "9": ("Tạo các thư mục img/problem", ["init"]),
+        "R": ("Dừng và xóa checkpoint của chế độ Polygon cũ", ["polygon-legacy", "stop"]),
+    }
+    while True:
+        print("\n=== Gemini → Polygon: Start / Stop ===")
+        for key, (label, _) in actions.items():
+            print(f"{key}. {label}")
+        print("0. Đóng menu (tác vụ đang chạy vẫn tiếp tục)")
+        try:
+            choice = input("Chọn: ").strip().upper()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+        if choice == "0":
+            return 0
+        if choice not in actions:
+            print("Lựa chọn không hợp lệ.")
+            continue
+        command = actions[choice][1]
+        try:
+            if sys.platform == "win32" and choice not in ("2", "R"):
+                subprocess.Popen(
+                    [sys.executable, "-u", str(ROOT / "pipeline.py"), "menu-task", *command],
+                    cwd=ROOT, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10),
+                )
+                print("Đã mở cửa sổ tác vụ. Chọn 2 trong menu này khi cần dừng.")
+            else:
+                result = main(command)
+                if result:
+                    print(f"Tác vụ chưa hoàn tất (mã {result}); xem thông báo phía trên.")
+        except OSError as exc:
+            print(f"Không mở được tác vụ: {exc}", file=sys.stderr)
+
+
+def menu_task(arguments: list[str]) -> int:
+    """Keep a detached task's console available for reading its result."""
+    result = main(arguments)
+    try:
+        input("\nNhấn Enter để đóng cửa sổ tác vụ...")
+    except (EOFError, KeyboardInterrupt):
+        pass
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] in (["--help"], ["-h"]):
-        print("Dùng: python pipeline.py [run|check|init|resume|gemini|polygon|polygon-one|polygon-legacy|stop] [tùy chọn]\n"
+        print("Dùng: python pipeline.py [menu|run|check|init|resume|gemini|polygon|polygon-one|polygon-legacy|stop] [tùy chọn]\n"
+              "  menu         menu Start/Stop dùng chung\n"
               "  run          ảnh → Gemini → problem → Polygon (mặc định)\n"
               "  check        kiểm tra ảnh offline\n"
               "  init         tạo thư mục img/img1…img10 và problem/problem1…problem10\n"
@@ -274,10 +331,14 @@ def main(argv: list[str] | None = None) -> int:
               "Xem tùy chọn: python pipeline.py run --help hoặc <chế độ> --help.")
         return 0
     action = arguments.pop(0) if arguments and not arguments[0].startswith("-") else "run"
-    if action not in ("run", "check", "init", "resume", "gemini", "polygon", "polygon-one", "polygon-legacy", "stop"):
+    if action not in ("menu", "menu-task", "run", "check", "init", "resume", "gemini", "polygon", "polygon-one", "polygon-legacy", "stop"):
         print("Chế độ không hợp lệ. Chạy python pipeline.py --help.", file=sys.stderr)
         return 2
     try:
+        if action == "menu":
+            return menu(arguments)
+        if action == "menu-task":
+            return menu_task(arguments)
         if action == "stop" or (action == "gemini" and arguments[:1] == ["--stop"]):
             from gemini_tool.stop import main as stop
             return stop(arguments[1:] if action == "gemini" else arguments)
@@ -286,6 +347,10 @@ def main(argv: list[str] | None = None) -> int:
         if action == "polygon-legacy":
             from polygon_tool.cli import legacy_launch
             return legacy_launch(arguments)
+        if (action == "resume" and not (ROOT / ".pipeline-state/polygon/batch.json").is_file()
+                and (ROOT / "run_state.json").is_file()):
+            from polygon_tool.cli import legacy_launch
+            return legacy_launch(["resume", "--state", str(ROOT / "run_state.json"), *arguments])
         sequential_resume = action == "resume" and saved_pipeline_options() is not None
         if action in ("resume", "polygon", "polygon-one") and not sequential_resume:
             if action == "polygon-one":
@@ -300,6 +365,11 @@ def main(argv: list[str] | None = None) -> int:
         # Help/init use only stdlib. Run/check install dependencies once, then
         # re-enter this same CLI with the environment's Python interpreter.
         if action != "init" and not any(arg in ("--help", "-h") for arg in arguments):
+            if action == "run":
+                from pipeline_reset import stop_previous_run
+                selected = parser().parse_args(["run", *arguments])
+                # Stop an interrupted bootstrap before waiting for its setup lock.
+                stop_previous_run(ROOT, selected.profile)
             python = _python_with_dependencies()
             if Path(sys.executable).absolute() != python.absolute():
                 return subprocess.call([str(python), "-u", str(ROOT / "pipeline.py"),
