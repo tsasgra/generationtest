@@ -4,15 +4,15 @@ Một lần chạy `start.bat` thực hiện liên tục:
 
 ```text
 img/imgN/ → gửi ảnh lên Gemini → lấy đủ 10 phần → problem/problemN/
-          → kiểm tra toàn bộ nội dung → tải lên Polygon → report.txt
+          → kiểm tra nội dung bài N → hoàn tất Polygon → chuyển sang bài N+1
 ```
 
 Hỗ trợ **1–10 bài** mỗi lượt. Mỗi thư mục ảnh chứa 1–10 ảnh của cùng một bài.
 Thư mục trống được bỏ qua; số bài luôn được giữ nguyên: chỉ có ảnh trong `img2`
 và `img10` thì kết quả nằm trong `problem2` và `problem10`.
-Các bài có thể chạy song song trong từng giai đoạn. Polygon chỉ bắt đầu sau khi
-mọi bài được chọn đã lưu đủ 10 phần hợp lệ; không cần chạy thêm script hay chép
-nội dung thủ công giữa hai bước.
+Các bài chạy **lần lượt theo số thứ tự**. Bài N phải nhận đủ 10 phần, tải lên Polygon
+và có package READY cùng link hợp lệ rồi mới gửi ảnh bài kế tiếp lên Gemini.
+Nếu một bài lỗi, luồng dừng tại bài đó; các bài phía sau chưa được gửi.
 
 ## Cách dùng
 
@@ -48,7 +48,7 @@ Các lệnh đều dùng chung `start.bat` hoặc `python pipeline.py`:
 | `start.bat` | Chạy toàn bộ luồng từ ảnh đến Polygon |
 | `start.bat init` | Tạo các thư mục đầu vào/đầu ra, không ghi đè file |
 | `start.bat check` | Kiểm tra ảnh offline, giữ kết quả cũ |
-| `start.bat resume` | Tiếp tục lô Polygon theo checkpoint, không gọi lại Gemini |
+| `start.bat resume` | Tiếp tục bài đang dở và các bài còn lại; không gửi lại bài đã nhận đủ nội dung |
 | `stop.bat` hoặc `start.bat stop` | Dừng tác vụ, giữ checkpoint và kết quả |
 | `start.bat gemini` | Chỉ gửi ảnh lên Gemini và lưu nội dung vào `problem/` |
 | `start.bat polygon` | Tải các bộ nội dung đã có trong `problem/` lên Polygon |
@@ -71,15 +71,16 @@ checkpoint con trong `run_state.problems/`, kết quả trong `results/`, `resul
 `problem_url.txt`. Cả hai định dạng checkpoint đều được giữ, không tự chuyển đổi lẫn nhau.
 Các bộ 10 file mẫu hoàn toàn trống được bỏ qua; bộ chỉ điền một phần sẽ báo lỗi.
 
-Ví dụ giảm số tác vụ đồng thời và tăng thời gian chờ:
+Ví dụ tăng thời gian chờ:
 
 ```powershell
-start.bat --workers 5 --polygon-workers 5 --response-timeout 1200 --poll-timeout 1800
+start.bat --response-timeout 1200 --poll-timeout 1800
 ```
 
-Mặc định mỗi giai đoạn có tối đa 10 tác vụ. Dùng `--workers 1 --polygon-workers 1`
-để xử lý lần lượt trong từng giai đoạn. Request Polygon được điều tiết chung trên
-cùng tài khoản, kể cả khi chạy song song.
+Mọi chế độ, kể cả Gemini/Polygon chạy riêng và Resume checkpoint cũ, đều xử lý một
+bài tại một thời điểm. `--workers`, `--polygon-workers` và `--jobs` được giữ để tương
+thích lệnh cũ nhưng chỉ nhận giá trị `1`. Request Polygon vẫn có khoảng nghỉ theo
+`--request-interval`.
 
 ```powershell
 python pipeline.py --help
@@ -113,14 +114,18 @@ tạo lại thư mục nhận bài. Ảnh trong `img/`, `.env`, thư viện và 
 Muốn gửi lại ảnh đã chuyển, chép chúng về `img/imgN/` trước khi Start.
 Đầu vào hoặc cấu hình không hợp lệ sẽ không xóa bộ kết quả cũ.
 
-Nếu Gemini lỗi hoặc thiếu phần, script dừng trước Polygon. Những file đã nhận vẫn
-được giữ lại để kiểm tra. Khi đã sửa đủ toàn bộ nội dung, có thể dùng `start.bat polygon`
-để tải lô đó mà không gọi lại Gemini.
+Nếu Gemini lỗi hoặc thiếu phần, script dừng trước bước Polygon của bài đó. Các bài
+đã hoàn thành và ảnh của các bài chưa xử lý được giữ lại. Dùng `start.bat resume`
+để tiếp tục; nếu đã có đủ 10 file của bài đang dở, script dùng lại chúng.
 
 Nếu Polygon lỗi, xem `report.txt` và dùng **`start.bat resume`**. Checkpoint riêng ở
 `.pipeline-state/polygon/`; kết quả ở `polygon_results/problemN/`. Resume giữ ID bài
 và package, kiểm tra nội dung/đường dẫn với checkpoint, và từ chối tạo lại bài khi
-checkpoint của bài đã bắt đầu bị mất. Khi request tạo bài/build bị mất phản hồi,
+checkpoint của bài đã bắt đầu bị mất. Danh sách đầy đủ các bài được lưu trước bước
+Gemini đầu tiên; `report.txt` luôn hiển thị cả các bài chưa đến lượt. Resume hoàn tất
+bài hiện tại trên Polygon rồi mới xử lý ảnh bài tiếp theo. Với checkpoint từ bản
+cũ chỉ có giai đoạn Polygon, Resume tiếp tục các bài đó lần lượt như trước.
+Khi request tạo bài/build bị mất phản hồi,
 khôi phục riêng bài theo hướng dẫn lỗi rồi chạy Resume cho cả lô.
 
 ## Cấu trúc và kiểm thử
@@ -143,6 +148,7 @@ python -m unittest discover -s tests -v
 ```
 
 Kiểm thử offline dùng ảnh và phản hồi giả lập để kiểm tra thứ tự các giai đoạn,
-đúng thư mục bài, dữ liệu lỗi, reset, lưu ảnh, checkpoint, resume và báo cáo.
+thứ tự hoàn tất từng bài qua cả hai dịch vụ, đúng thư mục bài, dữ liệu lỗi, reset,
+lưu ảnh, checkpoint, resume và báo cáo.
 Gemini và quy trình gọi Polygon được giả lập; đăng nhập Google, giao diện Gemini,
 launcher Windows và build package thật cần kiểm tra trên máy có tài khoản/dữ liệu.

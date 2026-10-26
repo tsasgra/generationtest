@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload up to ten Polygon problems concurrently, each from ten .txt files."""
+"""Upload up to ten Polygon problems sequentially, each from ten .txt files."""
 from __future__ import annotations
 
 import argparse
@@ -8,6 +8,7 @@ import os
 import sys
 from pathlib import Path
 
+from gemini_tool.control import exclusive_lock
 from polygon_tool.api import APIError, PolygonAPI, TransportError
 from polygon_tool.credentials import load_credentials
 from polygon_tool.input import discover_problems, init_batch, init_directory, parse_batch, parse_problem
@@ -54,7 +55,7 @@ def parser():
     init = sub.add_parser('init', help='Tạo thư mục gồm 10 file .txt trống, mỗi file là một phần.')
     init.add_argument('--output', type=Path, default=Path('problem'), help='Thư mục mới để tạo 10 file .txt.')
     init.add_argument('--count', type=problem_count, help='Tạo problem1..problemN, mỗi bài gồm 10 file .txt.')
-    run = sub.add_parser('run', help='Kiểm tra và tạo một bài hoặc tối đa 10 bài song song.')
+    run = sub.add_parser('run', help='Kiểm tra và tạo một bài hoặc tối đa 10 bài lần lượt.')
     run.add_argument('--input', type=Path, required=True, help='Một bài hoặc thư mục chứa problem1..problem10.')
     run.add_argument('--dry-run', action='store_true')
     run.add_argument('--time-limit', type=int)
@@ -70,7 +71,7 @@ def parser():
     correction.add_argument('--retry-failed-package', action='store_true', help='Chủ động build lại package FAILED, giữ revision.')
     for command in (run, resume):
         command.add_argument('--state', type=Path, default=Path('run_state.json'))
-        command.add_argument('--jobs', type=problem_count, default=None, help='Số bài chạy song song, mặc định 10.')
+        command.add_argument('--jobs', type=int, choices=(1,), default=1, help='Chạy tuần tự, mỗi lần một bài.')
         command.add_argument('--sample-indices', type=indices)
         command.add_argument('--output-dir', type=Path, default=None)
         command.add_argument('--request-timeout', type=positive, default=None)
@@ -160,7 +161,7 @@ def main(argv=None):
         defaults = {'request_timeout': 60.0, 'retries': 3, 'request_interval': 1.0,
                     'poll_interval': 5.0, 'poll_timeout': 900.0, 'browser_timeout': 300.0,
                     'browser': False, 'browser_profile': str(Path('.polygon-browser').resolve()),
-                    'output_dir': str(Path('.').resolve()), 'sample_indices': None, 'jobs': 10}
+                    'output_dir': str(Path('.').resolve()), 'sample_indices': None, 'jobs': 1}
         for name, default in defaults.items():
             value = getattr(args, name)
             if value is not None:
@@ -197,7 +198,10 @@ def main(argv=None):
                              ensure_ascii=False, indent=2))
             return 0
         key, secret = load_credentials(DEFAULT_ENV_FILE)
-        with state_lock(args.state):
+        root = DEFAULT_ENV_FILE.parent
+        with exclusive_lock(root / '.pipeline-run.lock'), state_lock(args.state):
+            with exclusive_lock(root / '.gemini-reset.lock'), exclusive_lock(root / '.gemini-upload.lock'):
+                (root / '.gemini-stop-request').unlink(missing_ok=True)
             if args.command == 'run' and args.state.exists():
                 raise ValueError('Checkpoint đã tồn tại. Dùng resume --state hoặc đường dẫn --state mới.')
             if args.command == 'resume' and paths is None:

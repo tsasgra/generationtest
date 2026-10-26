@@ -2,7 +2,7 @@
 
 # Polygon Upload — 10 bài cùng lúc
 
-Công cụ Python tải **tối đa 10 bài song song trong một lần chạy** từ `problem/problem1` đến `problem/problem10`. Mỗi bài có **10 file `.txt` riêng biệt**. Với từng bài, công cụ tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
+Công cụ Python tải **tối đa 10 bài lần lượt trong một lần chạy** từ `problem/problem1` đến `problem/problem10`. Mỗi bài có **10 file `.txt` riêng biệt**. Với từng bài, công cụ tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
 
 ## Bấm đúp để chạy trên Windows
 
@@ -10,7 +10,7 @@ Sau khi cập nhật hoặc tải repository về máy, điền đủ 10 file c�
 
 | File | Chức năng |
 | --- | --- |
-| **`start.bat`** | Upload tối đa 10 bài song song. Nếu có `run_state.json`, tiếp tục các bài chưa xong trong đợt đó; nếu chưa có, tạo đợt mới từ `problem/`. |
+| **`start.bat`** | Upload lần lượt tối đa 10 bài. Nếu có `run_state.json`, tiếp tục các bài chưa xong trong đợt đó; nếu chưa có, tạo đợt mới từ `problem/`. |
 | `start_resume.bat` | Tiếp tục đợt upload trong `run_state.json`, bỏ qua các bài đã hoàn tất. Báo lỗi nếu chưa có checkpoint. |
 | `start_check.bat` | Kiểm tra toàn bộ bài trong `problem/` bằng `--dry-run`, không gọi Polygon. |
 | **`stop.bat`** | Dừng uploader và xóa checkpoint/kết quả cục bộ của lần chạy trước trong thư mục này, để `start.bat` bắt đầu đợt mới. |
@@ -34,9 +34,9 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Phần API dùng thư viện chuẩn Python nên `requirements.txt` không có dependency bắt buộc. Các lệnh dưới dùng trực tiếp Python trong virtual environment, không cần đổi Execution Policy hoặc kích hoạt môi trường.
+Phần API dùng thư viện chuẩn Python; `requirements.txt` hiện chứa thêm các thư viện cho luồng Gemini chung. Các lệnh dưới dùng trực tiếp Python trong virtual environment, không cần đổi Execution Policy hoặc kích hoạt môi trường.
 
-Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Repository private này đã kèm `.env` theo cấu hình của chủ repo; bản clone từ GitHub có sẵn cấu hình để chạy. Điền đủ 10 file trong mỗi thư mục `problem/problemN/` trước khi upload.
+Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Chép `.env.example` thành `.env` và điền khóa API; khóa thật không được đưa vào commit mới. Điền đủ 10 file trong mỗi thư mục `problem/problemN/` trước khi upload.
 
 Nếu muốn dùng tài khoản Polygon khác, sửa hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong `.env`. Script không in credentials hoặc ghi chúng vào checkpoint/kết quả; các giá trị trong `.env` được đọc nguyên văn, không chạy như lệnh shell.
 
@@ -63,7 +63,7 @@ problem/
 └── problem10/  # 10 file .txt của bài 10
 ```
 
-Điền nội dung riêng cho từng bài; `name problem.txt` của các bài phải khác nhau. Nếu chỉ upload N bài (1 ≤ N ≤ 10), giữ các thư mục liên tục từ `problem1` đến `problemN`, chuyển những thư mục chưa dùng ra ngoài `problem/`. Thư mục rỗng vẫn được coi là một bài và sẽ báo lỗi thiếu nội dung. Tên `problem(1)` đến `problem(10)` cũng được hỗ trợ; không dùng đồng thời `problem1` và `problem(1)`. Không để bộ 10 file `.txt` trực tiếp ở thư mục cha khi chạy nhiều bài.
+Điền nội dung riêng cho từng bài; `name problem.txt` của các bài phải khác nhau. Có thể dùng bất kỳ thư mục nào từ `problem1` đến `problem10`. Thư mục trống và bộ 10 file mẫu hoàn toàn trống được bỏ qua; bộ điền dở sẽ báo lỗi. Tên `problem(1)` đến `problem(10)` cũng được hỗ trợ; không dùng đồng thời `problem1` và `problem(1)`. Không để bộ 10 file `.txt` trực tiếp ở thư mục cha khi chạy nhiều bài.
 
 Để tạo một đợt mới ở thư mục chưa tồn tại:
 
@@ -73,7 +73,11 @@ problem/
 .\.venv\Scripts\python.exe polygon_upload.py run --input my_batch
 ```
 
-`start.bat` tự nhận diện cấu trúc nhiều bài. Mặc định chạy tối đa 10 bài song song; dùng `--jobs 3` nếu muốn chỉ chạy 3 bài một lúc. Tất cả worker dùng chung `--request-interval` (mặc định 1 giây giữa các lần bắt đầu request) để giữ nhịp gọi API cho cả tài khoản. Việc chờ build package diễn ra độc lập; một bài lỗi không dừng các bài còn lại. Nếu bật `--browser`, các bước lấy link bằng trình duyệt lần lượt dùng chung profile đăng nhập.
+`start_polygon.bat` tự nhận diện cấu trúc nhiều bài và chạy lần lượt theo số thứ tự.
+Bài hiện tại phải hoàn tất package và lấy được link rồi mới bắt đầu bài tiếp theo.
+Một bài lỗi sẽ dừng đợt; Resume tiếp tục từ bài đang dở. `--jobs` chỉ nhận `1`, kể cả
+khi checkpoint cũ từng lưu giá trị lớn hơn. `--request-interval` vẫn điều tiết các request.
+
 
 Toàn bộ đầu vào được kiểm tra trước khi gọi API. Thiếu file, nội dung bắt buộc rỗng hoặc tên định danh trùng sẽ dừng cả đợt trước khi tạo bài. Sau khi bắt đầu upload, kết quả/checkpoint được tách như sau:
 
@@ -201,7 +205,7 @@ Chỉ cờ `testUseInStatements` được cập nhật. Input và lệnh sinh te
 | `--request-timeout` | Mặc định 60 giây mỗi request |
 | `--retries` | Mặc định 3 lần thử lại cho lỗi đọc tạm thời; request ghi không tự lặp trong cùng lần chạy |
 | `--request-interval` | Mặc định 1 giây giữa các request, dùng chung cho cả đợt nhiều bài |
-| `--jobs` | 1–10; mặc định tối đa 10 bài chạy song song |
+| `--jobs` | Chỉ nhận 1; mỗi lần xử lý một bài |
 | `--poll-interval` | Mặc định 5 giây giữa các lần kiểm tra package |
 | `--poll-timeout` | Mặc định 900 giây cho một lần chờ package |
 
@@ -267,7 +271,7 @@ Trình duyệt mở để bạn đăng nhập thủ công lần đầu và mở 
 
 Bộ kiểm thử offline/mock được giữ riêng trong workspace phát triển, không đưa lên GitHub. Repository chứa mã chạy, cấu hình `.env` và 10 bộ đầu vào trống trong `problem/problem1` đến `problem/problem10`. File thử nghiệm, dữ liệu test, checkpoint và kết quả chạy không được đưa lên GitHub.
 
-Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu. Phần nhiều bài được kiểm tra offline/mock về thứ tự 1–10, đầu vào trùng/sai, chạy song song, giới hạn nhịp gọi API dùng chung, tách checkpoint/kết quả, lỗi một bài, tiếp tục các bài chưa xong, tương thích một bài và reset checkpoint.
+Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu. Phần nhiều bài được kiểm tra offline/mock về thứ tự 1–10, đầu vào trùng/sai, chạy tuần tự, dừng trước bài kế tiếp khi có lỗi, giới hạn nhịp gọi API, tách checkpoint/kết quả, lỗi một bài, tiếp tục các bài chưa xong, tương thích một bài và reset checkpoint.
 
 
 **Phần nhiều bài được kiểm thử offline/mock, chưa chạy end-to-end trên tài khoản Polygon thật.** Bộ khởi chạy Windows được kiểm tra cấu trúc lệnh, chưa chạy trên Windows trong môi trường phát triển này. Compiler phía server, tải file thật, render statement, phiên đăng nhập browser và package thực tế cần được xác nhận bằng lần chạy của bạn. Không có problem ID, package hoặc link thành công thật được tạo sẵn trong repository.

@@ -35,11 +35,11 @@ def numbered_folders(root: Path) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Xử lý song song img/img1 đến img/img10, lưu 10 Part mỗi bài vào problem/problem1 đến problem/problem10.")
+    parser = argparse.ArgumentParser(description="Xử lý tuần tự img/img1 đến img/img10, lưu 10 Part mỗi bài vào problem/problem1 đến problem/problem10.")
     parser.add_argument("--input", type=Path, help="Dùng một thư mục ảnh riêng thay cho hàng đợi mặc định img/img1–img/img10.")
     parser.add_argument("--recursive", action="store_true", help="Đọc cả các thư mục con.")
-    parser.add_argument("--workers", type=int, choices=range(1, 11), default=10,
-                        help="Số bài chạy đồng thời (mặc định 10). Dùng 1 để chạy lần lượt.")
+    parser.add_argument("--workers", type=int, choices=(1,), default=1,
+                        help="Chạy lần lượt, mỗi lần một bài.")
     parser.add_argument("--dry-run", action="store_true", help="Kiểm tra/chuyển ảnh offline, không mở Gemini.")
     parser.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-native",
                         help="Thư mục profile Chrome/Edge riêng, giống copy_info_on_gemini.")
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                     if not tasks:
                         print("Chưa có ảnh. Đặt ảnh từng bài vào img/img1 đến img/img10 rồi chạy lại Start.")
                         return 0
-                    print(f"Đã chuẩn bị {sum(len(task.images) for task in tasks)} ảnh cho {len(tasks)} bài; chạy đồng thời tối đa {min(args.workers, len(tasks))} bài.")
+                    print(f"Đã chuẩn bị {sum(len(task.images) for task in tasks)} ảnh cho {len(tasks)} bài; chạy lần lượt từng bài.")
                 if args.dry_run:
                     print("Kiểm tra offline thành công. Chưa mở Gemini hoặc tải ảnh lên mạng.")
                     return 0

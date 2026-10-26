@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -17,7 +18,7 @@ from gemini_tool.parts import DEFAULT_PROMPT, validate_output
 from gemini_tool.state import ordinary_directory, remember_profile
 from gemini_tool.cli import numbered_folders
 from polygon_tool.credentials import load_credentials
-from polygon_tool.input import MAX_PROBLEMS
+from polygon_tool.input import MAX_PROBLEMS, parse_problem
 from polygon_tool.cli import positive as positive_number, validate_options
 
 ROOT = Path(__file__).resolve().parent
@@ -66,9 +67,9 @@ def prepare_tasks(root: Path, temporary: Path, max_file_mb: float) -> list[Uploa
 
 def execute(args, *, root: Path = ROOT) -> int:
     from pipeline_reset import fresh_run
-    from polygon_tool.batch import preflight, upload_batch
+    from polygon_tool.batch import upload_batch
 
-    _, problem_dirs = directories(root)
+    image_dirs, problem_dirs = directories(root)
     if args.command == "init":
         initialize(root)
         print("Đã tạo img/img1…img10 và problem/problem1…problem10.")
@@ -85,47 +86,79 @@ def execute(args, *, root: Path = ROOT) -> int:
     with ExitStack() as held:
         runtime = root / ".gemini-runtime"
         tasks = []
+        selected = []
+        temporary = None
+        resume = args.command == "resume"
 
         def prepare():
+            nonlocal temporary
             # Missing credentials/images must not erase the previous results.
             load_credentials(root / ".env")
             runtime.mkdir(parents=True, exist_ok=True)
             temporary = held.enter_context(tempfile.TemporaryDirectory(prefix="upload-", dir=runtime))
-            tasks.extend(prepare_tasks(root, Path(temporary), args.max_file_mb))
+            if resume:
+                manifest = json.loads((root / ".pipeline-state/polygon/batch.json").read_text(encoding="utf-8"))
+                selected.extend(Path(entry["path"]) for entry in manifest["inputs"])
+                if any(path not in problem_dirs for path in selected):
+                    raise ValueError("Thư mục bài trong checkpoint không thuộc lượt chạy này.")
+            else:
+                tasks.extend(prepare_tasks(root, Path(temporary), args.max_file_mb))
+                selected.extend(task.output for task in tasks)
 
-        held.enter_context(fresh_run(root, problem_dirs, args.profile, before_reset=prepare))
+        held.enter_context(fresh_run(root, problem_dirs, args.profile, before_reset=prepare, resume=resume))
         initialize(root)
         remember_profile(runtime, args.profile)
-        print(f"Bước 1/3: gửi {len(tasks)} bài lên Gemini, tối đa {args.workers} tab song song.", flush=True)
-        upload_tasks(tasks, profile=args.profile, login_timeout=args.login_timeout,
-                     upload_timeout=args.upload_timeout, response_timeout=args.response_timeout,
-                     prompt=args.prompt, keep_images=False, workers=args.workers)
-        check_stop()
-        # Only this run's full set may enter the Polygon stage. Start already
-        # removed all old problem data, so stale output cannot leak in.
-        selected = [task.output for task in tasks]
-        preflight(selected)
-        print(f"Bước 2/3: đã lưu và kiểm tra đủ 10 phần cho {len(tasks)} bài trong problem/.", flush=True)
-        print(f"Bước 3/3: tải {len(tasks)} bài lên Polygon, tối đa {args.polygon_workers} bài song song.", flush=True)
+
+        def generate(output):
+            check_stop()
+            # A stop after atomic export but before recording its digest must
+            # reuse that complete response instead of sending the images again.
+            if resume:
+                try:
+                    parse_problem(output)
+                except (OSError, ValueError):
+                    pass
+                else:
+                    print(f"{output.name}: dùng lại bộ 10 phần đã lưu; tiếp tục Polygon.", flush=True)
+                    return
+            task = next((task for task in tasks if task.output == output), None)
+            if task is None:
+                number = problem_dirs.index(output)
+                source = image_dirs[number]
+                images = prepare_images(collect_images(source), Path(temporary) / source.name,
+                                        args.max_file_mb, skip_invalid=False)
+                if not 1 <= len(images) <= 10 or any(not image.complete for image in images):
+                    raise ImageInputError(f"{source.name}: cần 1–10 ảnh một trang của cùng một bài.")
+                task = UploadTask(images, output, output.name)
+            print(f"{output.name} — bước 1/3: gửi ảnh và chờ Gemini.", flush=True)
+            upload_tasks([task], profile=args.profile, login_timeout=args.login_timeout,
+                         upload_timeout=args.upload_timeout, response_timeout=args.response_timeout,
+                         prompt=args.prompt, keep_images=False, workers=1)
+            parse_problem(output)
+            print(f"{output.name} — bước 2/3: đã lưu đủ 10 phần; bước 3/3: tải lên Polygon.", flush=True)
+
+        print(f"Xử lý tuần tự {len(selected)} bài; mỗi bài hoàn tất Polygon rồi mới sang bài kế tiếp.", flush=True)
         results = upload_batch(
             selected, state_dir=root / ".pipeline-state" / "polygon",
             output_dir=root / "polygon_results", report_path=root / "report.txt",
             options={"timeLimit": args.time_limit, "memoryLimit": args.memory_limit,
                      "source_type": args.source_type, "request_interval": args.request_interval,
                      "poll_timeout": args.poll_timeout},
-            workers=args.polygon_workers, resume=False,
+            workers=1, resume=resume, prepare=generate,
+            pipeline_options={key: str(value) if isinstance(value, Path) else value
+                              for key, value in vars(args).items() if key != "command"},
         )
-        print(f"Hoàn tất {len(results)}/{len(tasks)} bài. Tổng hợp link: {root / 'report.txt'}", flush=True)
+        print(f"Hoàn tất {len(results)}/{len(selected)} bài. Tổng hợp link: {root / 'report.txt'}", flush=True)
     return 0
 
 
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument("command", choices=("run", "check", "init"), nargs="?", default="run",
+    cli.add_argument("command", choices=("run", "check", "init", "resume"), nargs="?", default="run",
                      help="run: xóa checkpoint và toàn bộ dữ liệu problem rồi chạy mới; check: kiểm tra ảnh offline.")
     cli.add_argument("--profile", type=Path, default=ROOT / ".gemini-browser-native")
-    cli.add_argument("--workers", type=int, choices=range(1, 11), default=10)
-    cli.add_argument("--polygon-workers", type=int, choices=range(1, 11), default=10)
+    cli.add_argument("--workers", type=int, choices=(1,), default=1, help="Chạy tuần tự từng bài.")
+    cli.add_argument("--polygon-workers", type=int, choices=(1,), default=1, help="Chạy tuần tự từng bài.")
     cli.add_argument("--login-timeout", type=positive_number, default=600)
     cli.add_argument("--upload-timeout", type=positive_number, default=180)
     cli.add_argument("--response-timeout", type=positive_number, default=600)
@@ -139,14 +172,31 @@ def parser() -> argparse.ArgumentParser:
     return cli
 
 
+def saved_pipeline_options(root: Path = ROOT):
+    path = root / ".pipeline-state/polygon/batch.json"
+    if not path.is_file():
+        return None
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    options = manifest.get("pipeline_options")
+    if options is not None and not isinstance(options, dict):
+        raise ValueError("Tùy chọn pipeline trong checkpoint không hợp lệ.")
+    return options
+
+
 def run_pipeline(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    cli = parser()
+    if argv and argv[0] == "resume":
+        saved = dict(saved_pipeline_options() or {})
+        if "profile" in saved:
+            saved["profile"] = Path(saved["profile"])
+        cli.set_defaults(**saved)
+    args = cli.parse_args(argv)
     if not args.prompt.strip():
         parser().error("--prompt không được rỗng.")
     try:
         return execute(args)
     except (StopRequested, KeyboardInterrupt):
-        print("Đã dừng. Start tạo lượt mới; start.bat resume tiếp tục giai đoạn Polygon.", file=sys.stderr)
+        print("Đã dừng. Dùng start.bat resume để tiếp tục bài đang dở và các bài còn lại.", file=sys.stderr)
         return 130
     except ImportError as exc:
         print(f"Thiếu thư viện {exc.name}. Chạy start.bat để cài thư viện.", file=sys.stderr)
@@ -215,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
               "  run          ảnh → Gemini → problem → Polygon (mặc định)\n"
               "  check        kiểm tra ảnh offline\n"
               "  init         tạo thư mục img/img1…img10 và problem/problem1…problem10\n"
-              "  resume       tiếp tục lô Polygon theo checkpoint\n"
+              "  resume       tiếp tục bài đang dở và các bài còn lại\n"
               "  gemini       chỉ gửi ảnh và lấy 10 phần về problem\n"
               "  polygon      tải lô problem đã có (run/resume)\n"
               "  polygon-one  xử lý hoặc khôi phục một bài Polygon (run/resume)\n"
@@ -236,7 +286,8 @@ def main(argv: list[str] | None = None) -> int:
         if action == "polygon-legacy":
             from polygon_tool.cli import legacy_launch
             return legacy_launch(arguments)
-        if action in ("resume", "polygon", "polygon-one"):
+        sequential_resume = action == "resume" and saved_pipeline_options() is not None
+        if action in ("resume", "polygon", "polygon-one") and not sequential_resume:
             if action == "polygon-one":
                 from polygon_tool.cli import main as polygon
             else:

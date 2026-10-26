@@ -104,7 +104,8 @@ class PipelineTests(unittest.TestCase):
     def test_full_pipeline_orders_stages_and_preserves_sparse_numbers(self):
         self.images(2, 10, parentheses=True)
         self.assertEqual(self.run_pipeline(), 0)
-        self.assertEqual(self.events[:2], [('export', 2), ('export', 10)])
+        self.assertEqual(self.events, [('export', 2), ('create', 2), ('complete', 2),
+                                       ('export', 10), ('create', 10), ('complete', 10)])
         self.assertEqual({n for kind, n in self.events if kind == 'create'}, {2, 10})
         for n in (2, 10):
             self.assertEqual(parse_problem(self.root / 'problem' / f'problem{n}')['name problem'], f'task-{n}')
@@ -119,24 +120,120 @@ class PipelineTests(unittest.TestCase):
     def test_all_ten_problems(self):
         self.images(*range(1, 11))
         self.assertEqual(self.run_pipeline(), 0)
+        self.assertEqual(self.events, [(event, number) for number in range(1, 11)
+                                       for event in ('export', 'create', 'complete')])
         self.assertIn('10/10', (self.root / 'report.txt').read_text())
+
+    def test_pipeline_polygon_failure_blocks_next_gemini_and_resume_finishes_queue(self):
+        self.images(1, 2, 10)
+        self.failures.add(2)
+        with self.assertRaises(batch.BatchError):
+            self.run_pipeline()
+        self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1),
+                                       ('export', 2), ('create', 2)])
+        self.assertTrue((self.root / 'img/img10/page.png').exists())
+        manifest = json.loads((self.root / '.pipeline-state/polygon/batch.json').read_text())
+        self.assertEqual([row['status'] for row in manifest['outcomes']], ['complete', 'failed', 'pending'])
+        self.assertIsNone(manifest['inputs'][2]['digest'])
+        self.assertIn('1/3', (self.root / 'report.txt').read_text())
+        self.failures.clear()
+        self.assertEqual(self.run_pipeline('resume'), 0)
+        self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1),
+                                       ('export', 2), ('create', 2), ('complete', 2),
+                                       ('export', 10), ('create', 10), ('complete', 10)])
+        self.assertIn('3/3', (self.root / 'report.txt').read_text())
+        self.assertEqual(self.remote.call_count, 3)
+
+    def test_pipeline_gemini_failure_resumes_without_repeating_completed_problem(self):
+        self.images(1, 2, 3)
+        def fail_second(tasks, **options):
+            if tasks[0].label == 'problem2':
+                raise RuntimeError('Gemini failed')
+            self.gemini(tasks, **options)
+        self.remote.side_effect = fail_second
+        with self.assertRaises(batch.BatchError):
+            self.run_pipeline()
+        self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1)])
+        self.remote.side_effect = self.gemini
+        self.assertEqual(self.run_pipeline('resume'), 0)
+        self.assertEqual(self.events, [(event, number) for number in (1, 2, 3)
+                                       for event in ('export', 'create', 'complete')])
+
+    def test_resume_reuses_response_exported_just_before_stop(self):
+        self.images(1, 2)
+        def export_then_stop(tasks, **options):
+            self.gemini(tasks, **options)
+            raise control.StopRequested('after export')
+        self.remote.side_effect = export_then_stop
+        with self.assertRaises(control.StopRequested):
+            self.run_pipeline()
+        self.assertEqual(self.events, [('export', 1)])
+        self.remote.side_effect = self.gemini
+        self.assertEqual(self.run_pipeline('resume'), 0)
+        self.assertEqual(self.events, [(event, number) for number in (1, 2)
+                                       for event in ('export', 'create', 'complete')])
+        self.assertEqual(self.remote.call_count, 2)
+
+    def test_duplicate_later_slug_stops_before_its_polygon_upload(self):
+        self.images(1, 2)
+        def duplicate(tasks, **options):
+            self.gemini(tasks, **options)
+            if tasks[0].label == 'problem2':
+                (tasks[0].output / 'name problem.txt').write_text('task-1')
+        self.remote.side_effect = duplicate
+        with self.assertRaisesRegex(batch.BatchError, 'trùng'):
+            self.run_pipeline()
+        self.assertEqual([number for event, number in self.events if event == 'create'], [1])
+
+    def test_standalone_polygon_stops_at_first_failure(self):
+        self.problem(2)
+        self.problem(10)
+        self.failures.add(2)
+        with self.assertRaises(batch.BatchError):
+            self.upload([2, 10])
+        self.assertEqual(self.events, [('create', 2)])
+        manifest = json.loads((self.root / '.pipeline-state/polygon/batch.json').read_text())
+        self.assertEqual(manifest['outcomes'][1], {'status': 'pending', 'started': False})
+
+    def test_resume_loads_saved_pipeline_profile_and_timeouts(self):
+        profile = self.root / '.saved-profile'
+        with patch.object(pipeline, 'saved_pipeline_options', return_value={
+                'profile': str(profile), 'response_timeout': 1234, 'workers': 1}), \
+                patch.object(pipeline, 'execute', return_value=0) as execute:
+            self.assertEqual(pipeline.run_pipeline(['resume']), 0)
+            args = execute.call_args.args[0]
+            self.assertEqual(args.profile, profile)
+            self.assertEqual(args.response_timeout, 1234)
+
+    def test_parallel_cli_options_are_rejected(self):
+        for parser, arguments in (
+                (pipeline.parser(), ['run', '--workers', '10']),
+                (pipeline.parser(), ['run', '--polygon-workers', '10']),
+                (batch.parser(), ['run', '--workers', '10']),
+                (cli.parser(), ['run', '--input', 'problem', '--jobs', '10'])):
+            with self.subTest(arguments=arguments), self.assertRaises(SystemExit) as error:
+                parser.parse_args(arguments)
+            self.assertEqual(error.exception.code, 2)
 
     def test_single_problem(self):
         self.images(7)
         self.assertEqual(self.run_pipeline(), 0)
         self.assertIn('1/1', (self.root / 'report.txt').read_text())
 
-    def test_incomplete_gemini_output_never_reaches_polygon(self):
+    def test_incomplete_gemini_output_stops_before_uploading_that_problem(self):
         self.images(1, 2)
         def incomplete(tasks, **kwargs):
-            self.problem(1)
-            self.problem(2)
-            (self.root / 'problem/problem2/solution.txt').unlink()
+            if tasks[0].label == 'problem1':
+                self.gemini(tasks, **kwargs)
+            else:
+                self.problem(2)
+                (self.root / 'problem/problem2/solution.txt').unlink()
         self.remote.side_effect = incomplete
-        with self.assertRaisesRegex(ValueError, 'solution.txt'):
+        with self.assertRaisesRegex(batch.BatchError, 'solution.txt'):
             self.run_pipeline()
-        self.assertEqual(self.events, [])
-        self.assertFalse((self.root / '.pipeline-state/polygon/batch.json').exists())
+        self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1)])
+        self.assertFalse((self.root / '.pipeline-state/polygon/02.json').exists())
+        self.assertIn('1/2', (self.root / 'report.txt').read_text())
 
     def test_gemini_error_never_reaches_polygon(self):
         self.images(1)
@@ -275,8 +372,8 @@ class PipelineTests(unittest.TestCase):
     def test_unified_cli_dispatches_without_extra_installation(self):
         with patch.object(batch, 'main', return_value=0) as main, \
                 patch.object(pipeline, '_python_with_dependencies') as setup:
-            self.assertEqual(pipeline.main(['resume', '--workers', '2']), 0)
-            main.assert_called_once_with(['resume', '--workers', '2'])
+            self.assertEqual(pipeline.main(['resume', '--workers', '1']), 0)
+            main.assert_called_once_with(['resume', '--workers', '1'])
             setup.assert_not_called()
 
 
@@ -305,7 +402,7 @@ class PipelineTests(unittest.TestCase):
             for folder in (self.root / 'problem/problem2', self.root / 'problem'):
                 output = io.StringIO()
                 with redirect_stdout(output):
-                    self.assertEqual(cli.main(['run', '--input', str(folder), '--dry-run', '--jobs', '2']), 0)
+                    self.assertEqual(cli.main(['run', '--input', str(folder), '--dry-run', '--jobs', '1']), 0)
                 self.assertTrue(json.loads(output.getvalue())['valid'])
             credentials.assert_not_called()
 
@@ -316,13 +413,16 @@ class PipelineTests(unittest.TestCase):
         arguments = ['--state', str(state), '--output-dir', str(self.root / 'legacy_results')]
         self.failures.add(10)
         with patch.object(cli, 'DEFAULT_ENV_FILE', self.root / '.env'):
-            self.assertEqual(cli.main(['run', '--input', str(self.root / 'problem'), '--jobs', '2', *arguments]), 1)
+            self.assertEqual(cli.main(['run', '--input', str(self.root / 'problem'), '--jobs', '1', *arguments]), 1)
             saved = json.loads(state.read_text())
             self.assertEqual(saved['kind'], 'batch')
             self.assertEqual([row['folder'] for row in saved['problems']], ['problem2', 'problem10'])
             self.assertTrue((self.root / 'run_state.problems/problem10.json').exists())
+            saved['options']['jobs'] = 10  # Old checkpoints must also resume one at a time.
+            atomic_json(state, saved)
             self.failures.clear()
             self.assertEqual(cli.main(['resume', *arguments]), 0)
+            self.assertEqual(json.loads(state.read_text())['options']['jobs'], 1)
         self.assertEqual(sorted(n for kind, n in self.events if kind == 'create'), [2, 10])
         results = json.loads((self.root / 'legacy_results/result.json').read_text())
         self.assertEqual(results['completed'], 2)

@@ -2,16 +2,14 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 import re
 import sys
 import time
-from threading import Event
 from urllib.parse import urlencode, urlsplit
 
-from .control import cancellation_scope, check_stop, exclusive_lock
+from .control import check_stop, exclusive_lock
 from .images import PreparedImage, archive_uploaded
 from .native import close_native_browser, start_native_browser, wait_for_manual_login
 from .parts import output_destinations, validate_output, wait_for_parts, write_parts
@@ -524,53 +522,6 @@ def _validate_task(task: UploadTask, attach_only: bool):
         validate_output(task.output)
 
 
-def _parallel_worker(task: UploadTask, port: int, cancellation: Event, options: dict):
-    with cancellation_scope(cancellation):
-        check_stop()
-        _validate_task(task, options["attach_only"])
-        with browser_context(port) as context:
-            # Never reuse a shared/restored tab: each worker owns this new page.
-            page = context.new_page()
-            _process_task(task, page, **options)
-
-
-def _parallel_upload(tasks: list[UploadTask], *, profile: Path, workers: int, options: dict):
-    cancellation = Event()
-    failures = []
-    with logged_in_browser(profile, options["login_timeout"]) as port:
-        print(f"Đã mở phiên Chrome/Edge; chạy song song tối đa {min(workers, len(tasks))} bài trên các tab riêng.", flush=True)
-        executor = ThreadPoolExecutor(max_workers=min(workers, len(tasks)), thread_name_prefix="gemini")
-        futures = {}
-        try:
-            for task in tasks:
-                check_stop()
-                futures[executor.submit(_parallel_worker, task, port, cancellation, options)] = task
-            pending = set(futures)
-            finished = 0
-            while pending:
-                check_stop()
-                done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
-                for future in done:
-                    task = futures[future]
-                    try:
-                        future.result()
-                    except Exception as exc:
-                        failures.append(f"{task.label}: {exc}")
-                        print(f"{task.label}: lỗi; giữ ảnh chưa hoàn tất. Các bài khác tiếp tục. {exc}",
-                              file=sys.stderr, flush=True)
-                    finished += 1
-                    print(f"Đã kết thúc {finished}/{len(tasks)} bài; {len(failures)} bài lỗi.", flush=True)
-        finally:
-            # Ctrl+C also reaches here. Wake every polling UI/file wait before
-            # joining workers; cleanup must not remove files still in use.
-            cancellation.set()
-            for future in futures:
-                future.cancel()
-            executor.shutdown(wait=True, cancel_futures=True)
-    if failures:
-        raise GeminiBrowserError("Các bài khác đã kết thúc; giữ kết quả thành công.\n" + "\n".join(failures))
-
-
 def upload_images(images: list[PreparedImage], *, profile: Path,
                   login_timeout: float, upload_timeout: float,
                   batch_size: int, prompt: str, keep_images: bool = False,
@@ -590,13 +541,13 @@ def upload_tasks(tasks: list[UploadTask], *, profile: Path,
                  login_timeout: float, upload_timeout: float,
                  prompt: str, keep_images: bool = False, attach_only: bool = False,
                  response_timeout: float = 600, workers: int = 1):
-    """Run independent problems in separate tabs; preserve each output mapping."""
+    """Finish each problem in numeric input order before opening the next chat."""
     from playwright.sync_api import Error as PlaywrightError
 
     if not tasks:
         return
-    if not 1 <= workers <= 10:
-        raise ValueError("Số bài chạy song song phải từ 1 đến 10.")
+    if type(workers) is not int or workers != 1:
+        raise ValueError("Luồng tuần tự chỉ hỗ trợ workers=1.")
     if not attach_only:
         outputs = [task.output.resolve() for task in tasks]
         for index, output in enumerate(outputs):
@@ -609,9 +560,6 @@ def upload_tasks(tasks: list[UploadTask], *, profile: Path,
     # below still catch a destination changed after this shared preflight.
     for task in tasks:
         _validate_task(task, attach_only)
-    if workers > 1 and len(tasks) > 1:
-        _parallel_upload(tasks, profile=profile, workers=workers, options=options)
-        return
     pages = []
     try:
         with open_browser(profile, login_timeout) as context:

@@ -96,12 +96,12 @@ def _clear_outputs(root: Path, problem_dirs: list[Path], legacy: list[Path]) -> 
 
 
 @contextmanager
-def fresh_run(root: Path, problem_dirs: list[Path], profile: Path, *, before_reset=None):
-    """Hold the run locks while resetting and processing a fresh batch.
+def fresh_run(root: Path, problem_dirs: list[Path], profile: Path, *, before_reset=None, resume=False):
+    """Hold the run locks through a fresh or resumed sequential pipeline.
 
-    Reset is performed once, before yielding. Completion/failure never erases
-    the new report/checkpoints. Lock files are synchronization, not progress;
-    an in-use legacy lock is deliberately never unlinked.
+    Browser runtime is reset before yielding. Resume keeps problem data and
+    checkpoints; a fresh run clears them once after preflight succeeds.
+    Lock files are synchronization, not progress; active locks stay in place.
     """
     root = Path(root).absolute()
     problem_dirs = [Path(path).absolute() for path in problem_dirs]
@@ -132,8 +132,10 @@ def fresh_run(root: Path, problem_dirs: list[Path], profile: Path, *, before_res
                 # A callback can prepare uploads after old runtime cleanup.
                 if before_reset is not None:
                     before_reset()
-                print("Đang xóa checkpoint, kết quả cũ và toàn bộ dữ liệu trong problem, kể cả img...", flush=True)
-                _clear_outputs(root, problem_dirs, legacy)
+                if not resume:
+                    print("Đang xóa checkpoint, kết quả cũ và toàn bộ dữ liệu trong problem, kể cả img...", flush=True)
+                    _clear_outputs(root, problem_dirs, legacy)
             (root / ".gemini-stop-request").unlink(missing_ok=True)
-        print("Đã dọn problem và checkpoint; bắt đầu lượt mới. Ảnh đầu vào trong img/ và đăng nhập được giữ lại.", flush=True)
+        print("Tiếp tục lượt cũ; giữ problem và checkpoint." if resume else
+              "Đã dọn problem và checkpoint; bắt đầu lượt mới. Ảnh đầu vào trong img/ và đăng nhập được giữ lại.", flush=True)
         yield

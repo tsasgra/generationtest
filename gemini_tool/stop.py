@@ -319,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Đã hoàn tất Stop; không còn tiến trình của công cụ (dừng cưỡng bức {stopped} tiến trình gốc).")
     print(f"Đã dọn {removed} mục dữ liệu Gemini tạm: kết nối, tab khôi phục, bản nháp, cache và ảnh tạm.")
     print("Giữ ảnh gốc, đăng nhập, nội dung problem, checkpoint Polygon và report.txt.")
-    print("Dùng start.bat resume để tiếp tục Polygon; start.bat xóa trạng thái và nội dung cũ để chạy lượt mới.")
+    print("Dùng start.bat resume để tiếp tục bài đang dở và các bài còn lại; start.bat tạo lượt mới.")
     print("Tin nhắn Gemini và tác vụ Polygon đã nhận vẫn tồn tại trên máy chủ.")
     return 0
 

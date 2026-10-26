@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""Upload up to ten problem folders concurrently and collect Polygon links."""
+"""Upload up to ten problem folders sequentially and collect Polygon links."""
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 import json
 import math
 import os
 import re
 from pathlib import Path
-from threading import Event, Lock
+from threading import Lock
 import sys
 import threading
 import time
 
-from gemini_tool.control import (StopRequested, cancellation_scope, check_stop,
-                                 exclusive_lock, sleep)
+from gemini_tool.control import StopRequested, check_stop, exclusive_lock, sleep
 from polygon_tool.api import PolygonAPI
 from polygon_tool.credentials import load_credentials
 from polygon_tool.image_refs import has_image_reference
@@ -78,22 +76,29 @@ def _options(overrides: dict | None = None) -> dict:
     return value
 
 
-def preflight(problem_dirs: list[Path]) -> list[dict]:
+def queued_entries(problem_dirs: list[Path]) -> list[dict]:
     if not 1 <= len(problem_dirs) <= COUNT:
         raise ValueError(f'Cần từ 1 đến {COUNT} thư mục bài; đã nhận {len(problem_dirs)}.')
     paths = [Path(path).resolve() for path in problem_dirs]
     if len(set(paths)) != len(paths):
         raise ValueError('Các thư mục bài không được trùng nhau.')
     entries = []
-    for path, parts in zip(paths, parse_batch(paths)):
+    for path in paths:
         match = re.fullmatch(r'problem(?:([1-9][0-9]*)|\(([1-9][0-9]*)\))', path.name)
         if match is None or not 1 <= (number := int(match[1] or match[2])) <= COUNT:
             raise ValueError(f'Tên thư mục bài không hợp lệ: {path.name}.')
         entries.append({'number': number, 'path': str(path),
-                        'name': parts['name problem'], 'digest': digest(parts), 'parts': parts})
+                        'name': None, 'digest': None})
     if len({entry['number'] for entry in entries}) != len(entries):
         raise ValueError('Các bài không được trùng số thứ tự.')
     return sorted(entries, key=lambda entry: entry['number'])
+
+
+def preflight(problem_dirs: list[Path]) -> list[dict]:
+    entries = queued_entries(problem_dirs)
+    for entry, parts in zip(entries, parse_batch([Path(entry['path']) for entry in entries])):
+        entry.update(name=parts['name problem'], digest=digest(parts), parts=parts)
+    return entries
 
 
 def _validate_paths(entries: list[dict], state_dir: Path, output_dir: Path, report: Path) -> None:
@@ -157,7 +162,7 @@ def _write_report(path: Path, entries: list[dict], outcomes: list[dict]) -> None
     complete = sum(item['status'] == 'complete' for item in outcomes)
     lines = [f'Polygon: {complete}/{len(entries)} bài hoàn tất', '']
     for entry, outcome in zip(entries, outcomes):
-        prefix = f"{entry['number']:02d}. {entry['name']}"
+        prefix = f"{entry['number']:02d}. {entry['name'] or Path(entry['path']).name}"
         if outcome['status'] == 'complete':
             lines.append(f"{prefix}: {outcome['result']['problem_url']}")
         else:
@@ -167,7 +172,7 @@ def _write_report(path: Path, entries: list[dict], outcomes: list[dict]) -> None
             message = ' '.join(message.splitlines())
             lines.append(f"{prefix}: {labels[outcome['status']]}" + (f' — {message}' if message else ''))
     image_warnings = [f"problem{entry['number']}, {entry['name']}, thiếu ảnh" for entry in entries
-                      if has_image_reference(entry['parts'])]
+                      if has_image_reference(entry.get('parts', {}))]
     if image_warnings:
         lines.extend(['', 'Cần bổ sung ảnh thủ công trên Polygon:', *image_warnings])
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,33 +187,50 @@ def _write_report(path: Path, entries: list[dict], outcomes: list[dict]) -> None
 def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
                  output_dir: Path = ROOT / 'polygon_results',
                  report_path: Path = ROOT / 'report.txt', options: dict | None = None,
-                 workers: int = COUNT, resume: bool = False, dry_run: bool = False) -> list[dict]:
-    """Preflight inputs, run isolated workflows, and return results in numeric order.
+                 workers: int = 1, resume: bool = False, dry_run: bool = False,
+                 prepare=None, pipeline_options: dict | None = None) -> list[dict]:
+    """Finish each problem before starting the next; stop at the first failure.
 
-    Fresh runs never adopt an existing checkpoint. Resume uses the exact saved
-    input order and digests. A regular item failure does not interrupt other jobs;
-    Stop/Ctrl+C cancels outstanding work cooperatively and preserves every state.
-    The calling pipeline owns its lifecycle lock; standalone CLI acquires it below.
+    With prepare, inputs are generated on demand and the complete queue is saved
+    before Gemini starts. Existing version-1 Polygon checkpoints remain readable.
+    The caller owns the lifecycle lock; the standalone CLI acquires it below.
     """
-    if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= COUNT:
-        raise ValueError('workers phải nằm trong 1..10.')
-    entries = preflight(problem_dirs)
+    if type(workers) is not int or workers != 1:
+        raise ValueError('Luồng tuần tự chỉ hỗ trợ workers=1.')
+    entries = queued_entries(problem_dirs) if prepare is not None else preflight(problem_dirs)
     state_dir, output_dir, report_path = (Path(path).resolve() for path in (state_dir, output_dir, report_path))
     _validate_paths(entries, state_dir, output_dir, report_path)
     manifest_path = state_dir / 'batch.json'
     supplied = dict(options or {})
     current_options = _options(supplied)
     if dry_run:
+        if prepare is not None:
+            raise ValueError('Dùng pipeline.py check để kiểm tra ảnh offline.')
         return [{'number': entry['number'], 'name': entry['name'], 'valid': True} for entry in entries]
 
+    def metadata(entry):
+        return {key: value for key, value in entry.items() if key != 'parts'}
+
     with state_lock(manifest_path):
-        input_manifest = [{key: value for key, value in entry.items() if key != 'parts'} for entry in entries]
         if resume:
             if not manifest_path.is_file():
                 raise BatchError(f'Không có checkpoint lô: {manifest_path}.')
             manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-            if not isinstance(manifest, dict) or manifest.get('version') != 1 or manifest.get('inputs') != input_manifest:
-                raise BatchError('Đầu vào hoặc thứ tự bài khác checkpoint của lô. Không tiếp tục ghi lên Polygon.')
+            if not isinstance(manifest, dict) or manifest.get('version') != 1:
+                raise BatchError('Checkpoint lô không hợp lệ.')
+            saved_inputs = manifest.get('inputs')
+            if not isinstance(saved_inputs, list) or len(saved_inputs) != len(entries):
+                raise BatchError('Đầu vào hoặc thứ tự bài khác checkpoint của lô.')
+            for index, (entry, saved) in enumerate(zip(entries, saved_inputs)):
+                if not isinstance(saved, dict) or any(saved.get(key) != entry[key] for key in ('number', 'path')):
+                    raise BatchError('Đầu vào hoặc thứ tự bài khác checkpoint của lô.')
+                if saved.get('digest') is not None:
+                    current = preflight([Path(entry['path'])])[0]
+                    if metadata(current) != saved:
+                        raise BatchError('Đầu vào khác checkpoint; không tiếp tục ghi lên Polygon.')
+                    entries[index] = current
+                elif prepare is None:
+                    raise BatchError('Còn bài chưa nhận từ Gemini. Dùng start.bat resume để tiếp tục toàn bộ luồng.')
             if manifest.get('output_dir') != str(output_dir) or manifest.get('report_path') != str(report_path):
                 raise BatchError('Đường dẫn kết quả/report phải khớp checkpoint khi resume.')
             if not isinstance(manifest.get('options'), dict):
@@ -217,140 +239,114 @@ def upload_batch(problem_dirs: list[Path], *, state_dir: Path = DEFAULT_STATE,
             for name in _SERVER_OPTIONS:
                 if name in supplied and supplied[name] != saved_options[name]:
                     raise BatchError(f'Không đổi {name} trong lô đang tiếp tục.')
-            saved_options.update(supplied)
-            current_options = _options(saved_options)
-            # A started job losing its checkpoint must never silently create anew.
-            saved_outcomes = _validate_saved_outcomes(manifest)
-            for entry, outcome in zip(entries, saved_outcomes):
-                if outcome.get('started') and not (state_dir / f"{entry['number']:02d}.json").is_file():
+            current_options = _options({**saved_options, **supplied})
+            outcomes = _validate_saved_outcomes(manifest)
+            for entry, outcome in zip(entries, outcomes):
+                if outcome['started'] and (entry['digest'] is None or
+                        not (state_dir / f"{entry['number']:02d}.json").is_file()):
                     raise BatchError(f"Bài {entry['number']}: mất checkpoint; không tự tạo bài thay thế.")
         else:
             if manifest_path.exists() or any(state_dir.glob('[0-9][0-9].json')):
                 raise BatchError('Checkpoint lô đã tồn tại. Dùng resume hoặc Start để bắt đầu lượt mới.')
-            manifest = {'version': 1, 'inputs': input_manifest,
+            outcomes = [{'status': 'pending', 'started': False} for entry in entries]
+            manifest = {'version': 1, 'inputs': [metadata(entry) for entry in entries],
                         'output_dir': str(output_dir), 'report_path': str(report_path)}
 
-        # Credentials are loaded only after all local inputs and resume checks pass.
         key, secret = load_credentials(ROOT / '.env')
-        outcomes = [{'status': 'pending', 'started': (state_dir / f"{entry['number']:02d}.json").is_file()}
-                    for entry in entries]
         manifest.update(options=current_options, outcomes=outcomes, completed=False)
-        atomic_json(manifest_path, manifest)
-        _write_report(report_path, entries, outcomes)
-        gate, cancellation, log_lock = _RequestGate(current_options['request_interval']), Event(), Lock()
-        browser_lock = Lock()
+        if pipeline_options is not None:
+            manifest['pipeline_options'] = pipeline_options
 
-        def log(number: int, message: str):
-            with log_lock:
-                print(f'[Polygon problem{number}] {message}', file=sys.stderr, flush=True)
-
-        def resolve_url(*args, **kwargs):
-            # Browser fallbacks share a profile and must not open it concurrently.
-            if kwargs.get('browser'):
-                with browser_lock:
-                    check_stop()
-                    return resolve_problem_url(*args, **kwargs)
-            return resolve_problem_url(*args, **kwargs)
-
-        def upload(entry: dict) -> dict:
-            with cancellation_scope(cancellation):
-                check_stop()
-                number = entry['number']
-                path = state_dir / f'{number:02d}.json'
-                api = PolygonAPI(key, secret, timeout=current_options['request_timeout'],
-                                 retries=current_options['retries'], interval=0, request_gate=gate.wait)
-                item_options = {**current_options, 'input_path': entry['path'],
-                                'output_dir': str(output_dir / f'problem{number}')}
-                try:
-                    with state_lock(path):
-                        if path.exists():
-                            saved = json.loads(path.read_text(encoding='utf-8'))
-                            if saved.get('version') != 1 or saved.get('input_digest') != entry['digest']:
-                                raise BatchError('Checkpoint bài không khớp nội dung đầu vào.')
-                            for name in _SERVER_OPTIONS:
-                                if saved.get('options', {}).get(name) != item_options.get(name):
-                                    raise BatchError(f'Checkpoint bài khác tùy chọn {name}.')
-                            # Retain explicit problem/package IDs selected by a
-                            # single-problem recovery, while refreshing transport.
-                            item_options = {**saved.get('options', {}), **item_options}
-                        workflow = Workflow(api, path, entry['parts'], item_options,
-                                            log=lambda message: log(number, message), sleep=sleep)
-                        if workflow.state:
-                            workflow.state['options'] = item_options
-                            workflow.save()
-                        result = workflow.run(resolve_url)
-                        if (result.get('package_state') != 'READY' or result.get('name') != entry['name'] or
-                                type(result.get('problem_id')) is not int or result['problem_id'] < 1 or
-                                result.get('problem_id') != workflow.state.get('problem_id')):
-                            raise BatchError('Kết quả Polygon chưa xác nhận đúng bài/package READY.')
-                        validate_problem_url(result.get('problem_url'),
-                                             {'owner': workflow.state.get('owner'), 'name': entry['name']})
-                        log(number, 'Hoàn tất: ' + result['problem_url'])
-                        return result
-                except Exception as exc:
-                    raise BatchError(api.redact(exc)) from None
-
-        executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='polygon')
-        futures = {}
-        interrupted = False
-        try:
-            # Persist dispatch BEFORE a worker can reach the API. If killed
-            # before recording its result, a missing item checkpoint blocks
-            # resume conservatively. A caught pre-create failure can explicitly
-            # record started=False because no remote mutation was attempted.
-            for index, entry in enumerate(entries):
-                check_stop()
-                outcomes[index]['started'] = True
-                atomic_json(manifest_path, manifest)
-                future = executor.submit(upload, entry)
-                futures[future] = index
-            for future in as_completed(futures):
-                index = futures[future]
-                try:
-                    result = future.result()
-                    outcomes[index] = {'status': 'complete', 'result': result, 'started': True}
-                except (StopRequested, KeyboardInterrupt):
-                    interrupted = True
-                    cancellation.set()
-                    outcomes[index] = {'status': 'stopped', 'started': (state_dir / f"{entries[index]['number']:02d}.json").exists()}
-                except Exception as exc:
-                    outcomes[index] = {'status': 'failed', 'error': str(exc),
-                                       'started': (state_dir / f"{entries[index]['number']:02d}.json").exists()}
-                    log(entries[index]['number'], 'Lỗi: ' + str(exc))
-                _reject_duplicate_results(outcomes)
-                atomic_json(manifest_path, manifest)
-                _write_report(report_path, entries, outcomes)
-        except (StopRequested, KeyboardInterrupt):
-            interrupted = True
-            cancellation.set()
-        finally:
-            if interrupted:
-                cancellation.set()
-            executor.shutdown(wait=True, cancel_futures=interrupted)
-            # Collect jobs that finished while main was interrupted, including
-            # successes whose link has not yet reached the report.
-            for future, index in futures.items():
-                if outcomes[index]['status'] != 'pending':
-                    continue
-                try:
-                    outcomes[index] = {'status': 'complete', 'result': future.result(), 'started': True}
-                except (StopRequested, KeyboardInterrupt, CancelledError):
-                    outcomes[index] = {'status': 'stopped', 'started': (state_dir / f"{entries[index]['number']:02d}.json").exists()}
-                except Exception as exc:
-                    outcomes[index] = {'status': 'failed', 'error': str(exc),
-                                       'started': (state_dir / f"{entries[index]['number']:02d}.json").exists()}
-            _reject_duplicate_results(outcomes)
+        def save():
+            manifest['inputs'] = [metadata(entry) for entry in entries]
             manifest['completed'] = all(item['status'] == 'complete' for item in outcomes)
             atomic_json(manifest_path, manifest)
             _write_report(report_path, entries, outcomes)
+
+        save()
+        gate = _RequestGate(current_options['request_interval'])
+
+        def log(number, message):
+            print(f'[Polygon problem{number}] {message}', file=sys.stderr, flush=True)
+
+        def upload(entry):
+            number = entry['number']
+            path = state_dir / f'{number:02d}.json'
+            api = PolygonAPI(key, secret, timeout=current_options['request_timeout'],
+                             retries=current_options['retries'], interval=0, request_gate=gate.wait)
+            item_options = {**current_options, 'input_path': entry['path'],
+                            'output_dir': str(output_dir / f'problem{number}')}
+            try:
+                with state_lock(path):
+                    if path.exists():
+                        saved = json.loads(path.read_text(encoding='utf-8'))
+                        if saved.get('version') != 1 or saved.get('input_digest') != entry['digest']:
+                            raise BatchError('Checkpoint bài không khớp nội dung đầu vào.')
+                        for name in _SERVER_OPTIONS:
+                            if saved.get('options', {}).get(name) != item_options.get(name):
+                                raise BatchError(f'Checkpoint bài khác tùy chọn {name}.')
+                        item_options = {**saved.get('options', {}), **item_options}
+                    workflow = Workflow(api, path, entry['parts'], item_options,
+                                        log=lambda message: log(number, message), sleep=sleep)
+                    if workflow.state:
+                        workflow.state['options'] = item_options
+                        workflow.save()
+                    # Finished problems need no new requests or package builds.
+                    if workflow.state.get('completed'):
+                        result = workflow.state['result']
+                    else:
+                        result = workflow.run(resolve_problem_url)
+                    if (result.get('package_state') != 'READY' or result.get('name') != entry['name'] or
+                            type(result.get('problem_id')) is not int or result['problem_id'] < 1 or
+                            result.get('problem_id') != workflow.state.get('problem_id')):
+                        raise BatchError('Kết quả Polygon chưa xác nhận đúng bài/package READY.')
+                    validate_problem_url(result.get('problem_url'),
+                                         {'owner': workflow.state.get('owner'), 'name': entry['name']})
+                    BatchWorkflow._write_problem_result(item_options, result)
+                    log(number, 'Hoàn tất: ' + result['problem_url'])
+                    return result
+            except Exception as exc:
+                raise BatchError(api.redact(exc)) from None
+
+        interrupted = False
+        for index, entry in enumerate(entries):
+            child = state_dir / f"{entry['number']:02d}.json"
+            try:
+                check_stop()
+                if entry['digest'] is None:
+                    # The pending queue was saved before this potentially long step.
+                    prepare(Path(entry['path']))
+                    current = preflight([Path(entry['path'])])[0]
+                    if any(other['name'] == current['name'] for j, other in enumerate(entries) if j != index):
+                        raise BatchError('Tên định danh trùng bài trước; sửa name problem.txt rồi Resume.')
+                    entry = entries[index] = current
+                    save()
+                outcomes[index] = {'status': 'pending', 'started': True}
+                save()  # Persist intent before the first possible Polygon mutation.
+                result = upload(entry)
+                outcomes[index] = {'status': 'complete', 'result': result, 'started': True}
+                _reject_duplicate_results(outcomes)
+                save()
+                if outcomes[index]['status'] != 'complete':
+                    break
+            except (StopRequested, KeyboardInterrupt):
+                interrupted = True
+                outcomes[index] = {'status': 'stopped', 'started': child.is_file()}
+                save()
+                break
+            except Exception as exc:
+                outcomes[index] = {'status': 'failed', 'error': str(exc), 'started': child.is_file()}
+                log(entry['number'], 'Lỗi: ' + str(exc))
+                save()
+                break
         if interrupted:
-            raise StopRequested('Đã dừng lô Polygon; checkpoint và report đã được lưu.')
+            raise StopRequested('Đã dừng; checkpoint, các bài còn lại và report đã được lưu.')
         if not manifest['completed']:
             complete = sum(item['status'] == 'complete' for item in outcomes)
-            raise BatchError(f'Hoàn tất {complete}/{len(entries)} bài. Xem {report_path}; dùng pipeline.py resume để tiếp tục.')
-        results = [item['result'] for item in outcomes]
-        return results
-
+            error = next((item.get('error', '') for item in outcomes if item['status'] == 'failed'), '')
+            raise BatchError(f'Hoàn tất {complete}/{len(entries)} bài. {error} '
+                             f'Xem {report_path}; dùng pipeline.py resume để tiếp tục.')
+        return [item['result'] for item in outcomes]
 
 
 # Standalone Polygon compatibility: run_state.json + run_state.problems/*.json.
@@ -379,7 +375,7 @@ class BatchWorkflow:
     def __init__(self, state_path, paths, problems, options, *, resume=False,
                  sample_override=False):
         self.path = Path(state_path).resolve()
-        self.options = options
+        self.options = {**options, 'jobs': 1}
         self.problems = problems
         self.step = 'batch-preflight'
         self.sample_override = sample_override
@@ -404,7 +400,7 @@ class BatchWorkflow:
             if children.exists() and any(path.suffix != '.lock' for path in children.iterdir()):
                 raise ValueError(f'Đã có checkpoint con trong {children}. Dùng resume hoặc --state mới.')
             self.state = {'version': 1, 'kind': 'batch', 'problems': entries}
-        self.state['options'] = options
+        self.state['options'] = self.options
 
     def log(self, folder, message):
         with self.log_lock:
@@ -505,18 +501,16 @@ class BatchWorkflow:
         entries = self.state['problems']
         rows = [{'folder': entry['folder'], 'status': 'pending'} for entry in entries]
         self._save_results(rows)
-        executor = ThreadPoolExecutor(max_workers=min(self.options['jobs'], len(entries)))
         try:
-            futures = {executor.submit(self._run_one, entry, parts, key, secret, url_resolver): index
-                       for index, (entry, parts) in enumerate(zip(entries, self.problems))}
-            for future in as_completed(futures):
-                rows[futures[future]] = future.result()
+            for index, (entry, parts) in enumerate(zip(entries, self.problems)):
+                check_stop()
+                rows[index] = self._run_one(entry, parts, key, secret, url_resolver)
                 self._save_results(rows)
+                if rows[index]['status'] != 'completed':
+                    break
         finally:
-            # Stop workers between requests, retaining every in-flight intent in
-            # its own checkpoint. HTTP calls already sent finish at their timeout.
             self.cancelled.set()
-            executor.shutdown(wait=True, cancel_futures=True)
+            self._save_results(rows)
         result = self._save_results(rows)
         self.log('batch', f'Hoàn tất {result["completed"]}/{result["total"]} bài; lỗi {result["failed"]} bài.')
         return result
@@ -529,7 +523,7 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument('--state-dir', type=Path, default=DEFAULT_STATE)
     cli.add_argument('--output-dir', type=Path, default=ROOT / 'polygon_results')
     cli.add_argument('--report', type=Path, default=ROOT / 'report.txt')
-    cli.add_argument('--workers', type=int, choices=range(1, 11), default=COUNT)
+    cli.add_argument('--workers', type=int, choices=(1,), default=1, help='Chạy tuần tự từng bài.')
     cli.add_argument('--dry-run', action='store_true')
     cli.add_argument('--time-limit', type=int)
     cli.add_argument('--memory-limit', type=int)
