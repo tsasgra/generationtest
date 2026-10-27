@@ -16,6 +16,8 @@ Các bài chạy **lần lượt theo số thứ tự**. Bài N phải nhận đ
 và có package READY cùng link hợp lệ rồi mới gửi ảnh bài kế tiếp lên Gemini.
 Nếu một bài lỗi, luồng dừng tại bài đó; các bài phía sau chưa được gửi.
 
+Prompt mặc định gửi kèm ảnh chỉ gồm một dòng: `apply polygon-setter skill`.
+
 ## Cách dùng
 
 1. Clone hoặc tải toàn bộ nhánh `main`. Cài Python 3.10+ và Chrome hoặc Edge trên Windows.

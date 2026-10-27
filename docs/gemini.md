@@ -8,7 +8,7 @@ rồi chạy **`python pipeline.py gemini`** một lần. Thư mục **`img/`** 
 Script chạy **tối đa 10 bài, mỗi lần một bài**, bỏ qua thư mục trống hoặc không tìm
 thấy ảnh hợp lệ (chỉ có file rỗng, file hỏng hoặc file không phải ảnh). Mỗi bài dùng
 một chat mới, gửi toàn bộ ảnh hợp lệ trong thư mục kèm đúng một dòng prompt
-`apply polygon-problem-setter skill`. Các bài dùng những tab riêng trong cùng
+`apply polygon-setter skill`. Các bài dùng những tab riêng trong cùng
 một trình duyệt và phiên đăng nhập Google. Mỗi tab tự chờ ảnh tải xong mới submit,
 chờ Gemini hoàn tất **10 Part**, xác nhận chat đã lưu, ghi đủ 10 file vào
 **`problem/problemN/`** rồi xử lý ảnh gốc của bài đó. Bài hiện tại lưu xong mới bắt đầu bài tiếp theo.
@@ -132,7 +132,7 @@ cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 ## Khi nào ảnh bị xóa?
 
 Mỗi thư mục `img/img1` đến `img/img10` là **một bài**, tối đa **10 ảnh**, được gửi vào một chat mới, kèm nội dung mặc định
-`apply polygon-problem-setter skill`, chỉ đúng một dòng này, không thêm nội dung khác.
+`apply polygon-setter skill`, chỉ đúng một dòng này, không thêm nội dung khác.
 Không trộn ảnh giữa hai thư mục hoặc tự tách một bài thành nhiều chat. Nếu một
 thư mục có hơn 10 ảnh hợp lệ, script báo lỗi trước khi mở trình duyệt, giữ nguyên ảnh.
 Trước khi bấm Gửi/submit, script phải thấy đủ
@@ -225,7 +225,7 @@ Bài hiện tại lưu đủ 10 phần mới bắt đầu bài tiếp theo; gặ
 
 ```bat
 python pipeline.py gemini --dry-run
-python pipeline.py gemini --prompt "apply polygon-problem-setter skill"
+python pipeline.py gemini --prompt "apply polygon-setter skill"
 python pipeline.py gemini --keep-images
 python pipeline.py gemini --attach-only
 ```
