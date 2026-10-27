@@ -120,9 +120,7 @@ class ResponsePollingTests(unittest.TestCase):
 class SequentialBrowserTests(unittest.TestCase):
     def test_reuses_login_home_and_owned_tab_without_replacing_restored_chats(self):
         for initial in ('about:blank', 'https://gemini.google.com/app?hl=en',
-                        'https://gemini.google.com/u/2/app', browser.GEMINI_URL,
-                        'https://gemini.google.com/u/2/app/744f177958be7e8d?hl=en',
-                        'https://gemini.google.com/app/old-chat'):
+                        'https://gemini.google.com/u/2/app', 'https://gemini.google.com/app/old-chat'):
             with self.subTest(initial=initial), tempfile.TemporaryDirectory() as directory:
                 existing = SimpleNamespace(url=initial, is_closed=lambda: False)
                 created = SimpleNamespace(url='about:blank', is_closed=lambda: False)
@@ -368,134 +366,6 @@ class ChromiumResponseTests(unittest.TestCase):
         }''')
         self.assertFalse(self.snapshot()['user'])
 
-    def test_submission_boundary_ignores_old_identical_prompt_and_attachments(self):
-        self.stop_streaming()
-        turn = self.page.evaluate(parts.BEGIN_SUBMISSION, {'prompt': parts.DEFAULT_PROMPT})
-        arguments = {'editorSelector': browser.EDITOR, 'prompt': parts.DEFAULT_PROMPT,
-                     'names': ['page.png'], 'turn': turn}
-        self.assertFalse(self.snapshot(turn=turn)['user'])
-        self.assertFalse(self.page.evaluate(browser.SAVED_MESSAGE, arguments))
-        # A new turn with the same prompt must not borrow the old attachments
-        # or the old, already complete ten-part answer.
-        self.page.evaluate('''prompt => {
-            const user = document.createElement('user-query');
-            user.textContent = prompt;
-            document.querySelector('input-container').before(user);
-        }''', parts.DEFAULT_PROMPT)
-        state = self.snapshot(turn=turn)
-        self.assertTrue(state['user'])
-        self.assertFalse(state['response'])
-        self.assertIsNone(state['events'])
-        self.assertFalse(self.page.evaluate(browser.SAVED_MESSAGE, arguments))
-        self.page.locator('user-query').last.evaluate('''el => {
-            const preview = document.createElement('user-query-file-preview');
-            preview.textContent = 'page.png';
-            el.append(preview);
-        }''')
-        self.assertTrue(self.page.evaluate(browser.SAVED_MESSAGE, arguments))
-        # Even an identical follow-up cannot replace the bound user turn.
-        self.page.locator('user-query').last.evaluate('el => el.after(el.cloneNode(true))')
-        self.assertFalse(self.snapshot(turn=turn)['user'])
-        self.assertFalse(self.page.evaluate(browser.SAVED_MESSAGE, arguments))
-
-    def test_submission_marker_does_not_survive_reload_or_accept_old_history(self):
-        self.stop_streaming()
-        turn = self.page.evaluate(parts.BEGIN_SUBMISSION, {'prompt': parts.DEFAULT_PROMPT})
-        self.page.reload()
-        self.page.set_content(
-            f'<user-query style="display:block">{parts.DEFAULT_PROMPT}</user-query>'
-            '<model-response style="display:block">old answer</model-response>')
-        self.assertFalse(self.snapshot(turn=turn)['user'])
-        with patch.object(parts, 'check_stop'), self.assertRaisesRegex(ValueError, 'Mất dấu lượt gửi'):
-            parts.wait_for_parts(self.page, parts.DEFAULT_PROMPT, timeout=1, turn=turn)
-
-    def test_two_problems_in_chosen_chat_export_only_their_new_answers(self):
-        self.stop_streaming()
-        self.page.evaluate('(url) => history.replaceState(null, "", url)', browser.GEMINI_URL)
-        self.page.evaluate('''() => {
-            const button = document.createElement('button');
-            button.id = 'send';
-            button.textContent = 'Send';
-            document.querySelector('input-container').append(button);
-            window.sentPrompts = [];
-            button.onclick = () => {
-                const editor = document.querySelector('[contenteditable]');
-                const prompt = editor.textContent;
-                window.sentPrompts.push(prompt);
-                editor.textContent = '';
-                // The composer clears before the new message arrives. Old
-                // matching history must not count as a successful submission.
-                setTimeout(() => {
-                    const user = document.createElement('user-query');
-                    user.textContent = prompt;
-                    const preview = document.createElement('user-query-file-preview');
-                    preview.textContent = 'page.png';
-                    user.append(preview);
-                    const response = document.createElement('model-response');
-                    for (const event of window.nextEvents) {
-                        const node = document.createElement('part' in event ? 'h3' : 'pre');
-                        node.textContent = 'part' in event ? `Part ${event.part}` : event.code;
-                        response.append(node);
-                    }
-                    document.querySelector('input-container').before(user, response);
-                }, 250);
-            };
-        }''')
-        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
-            stack.enter_context(patch.object(browser, 'open_chat'))
-            stack.enter_context(patch.object(browser, 'pause_after_action'))
-            stack.enter_context(patch.object(browser, 'choose_files'))
-            stack.enter_context(patch.object(browser, 'wait_for_upload', return_value=self.page.locator('#send')))
-            stack.enter_context(patch.object(browser, 'check_stop'))
-            stack.enter_context(patch.object(parts, 'check_stop'))
-            stack.enter_context(redirect_stdout(io.StringIO()))
-            for number in (1, 2):
-                solution = f'int main() {{ return {number}; }}'
-                self.page.evaluate('events => { window.nextEvents = events; }', response_events(solution))
-                output = Path(directory) / f'problem{number}'
-                task = browser.UploadTask([SimpleNamespace(upload=Path('page.png'))], output, f'problem{number}')
-                browser._process_task(task, self.page, login_timeout=1, upload_timeout=2,
-                                      prompt=parts.DEFAULT_PROMPT, keep_images=True,
-                                      attach_only=False, response_timeout=6)
-                self.assertEqual(parse_problem(output)['solution'], solution)
-                self.assertEqual(len(list(output.glob('*.txt'))), 10)
-            self.assertEqual(self.page.locator('user-query').count(), 3)
-            self.assertEqual(self.page.evaluate('window.sentPrompts'), [parts.DEFAULT_PROMPT] * 2)
-            self.assertEqual(self.page.url, browser.GEMINI_URL)
-
-    def test_open_chat_keeps_history_and_supports_account_redirect(self):
-        body = (
-            '<style>[contenteditable] {min-height:24px}</style>'
-            '<button aria-label="Google Account: fixture"></button>'
-            '<button onclick="window.newChatClicked = true">New chat</button>'
-            '<user-query style="display:block">Earlier instructions</user-query>'
-            '<input-container><rich-textarea><div contenteditable="true"></div></rich-textarea></input-container>'
-        )
-        account_url = 'https://gemini.google.com/u/2/app/744f177958be7e8d?hl=en'
-        body += f'<script>history.replaceState(null, "", "{account_url}")</script>'
-        self.context.unroute('**/*')
-        self.context.route('**/*', lambda route: route.fulfill(content_type='text/html', body=body))
-        with patch.object(browser, 'check_stop'):
-            browser.open_chat(self.page, timeout=3)
-        self.assertEqual(self.page.url, account_url)
-        self.assertEqual(self.page.locator('user-query').inner_text(), 'Earlier instructions')
-        self.assertFalse(self.page.evaluate('!!window.newChatClicked'))
-
-    def test_unavailable_chosen_chat_stops_before_uploading_in_a_new_chat(self):
-        body = ('<style>[contenteditable] {min-height:24px}</style>'
-                '<button aria-label="Google Account: fixture"></button>'
-                '<input-container><rich-textarea><div contenteditable="true"></div></rich-textarea></input-container>'
-                '<script>history.replaceState(null, "", "/app")</script>')
-        self.context.unroute('**/*')
-        self.context.route('**/*', lambda route: route.fulfill(content_type='text/html', body=body))
-        task = browser.UploadTask([SimpleNamespace(upload=Path('page.png'))], Path('unused'), 'problem1')
-        with patch.object(browser, 'check_stop'), patch.object(browser, 'choose_files') as upload, \
-                redirect_stdout(io.StringIO()), self.assertRaisesRegex(browser.GeminiBrowserError, 'Chưa mở được chat'):
-            browser._process_task(task, self.page, login_timeout=1, upload_timeout=1,
-                                  prompt=parts.DEFAULT_PROMPT, keep_images=True,
-                                  attach_only=False, response_timeout=1)
-        upload.assert_not_called()
-
     def test_refresh_rechecks_visibility_changed_outside_the_response(self):
         self.stop_streaming()
         self.page.add_style_tag(content='body.masked pre {display:none}')
@@ -528,9 +398,8 @@ class ChromiumResponseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             # Start at the submitted-message boundary; extraction, confirmation
             # and writing all ten UTF-8 files run against the real browser DOM.
-            for name in ('open_chat', 'pause_after_action', 'choose_files', 'wait_for_upload'):
+            for name in ('new_chat', 'pause_after_action', 'choose_files', 'wait_for_upload', 'send_prompt'):
                 stack.enter_context(patch.object(browser, name))
-            stack.enter_context(patch.object(browser, 'send_prompt', return_value=None))
             stack.enter_context(patch.object(parts, 'check_stop'))
             stack.enter_context(patch.object(browser, 'check_stop'))
             stack.enter_context(redirect_stdout(io.StringIO()))

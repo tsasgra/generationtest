@@ -17,9 +17,6 @@ và có package READY cùng link hợp lệ rồi mới gửi ảnh bài kế ti
 Nếu một bài lỗi, luồng dừng tại bài đó; các bài phía sau chưa được gửi.
 
 Prompt mặc định gửi kèm ảnh chỉ gồm một dòng: `apply polygon setter skill`.
-Tất cả bài được gửi lần lượt vào [chat Gemini đã chỉ định](https://gemini.google.com/app/744f177958be7e8d),
-không tạo New chat. Đăng nhập tài khoản có quyền mở chat này. Script đánh dấu từng
-lượt gửi để lấy đúng câu trả lời mới, kể cả khi lịch sử có cùng prompt hoặc tên ảnh.
 
 Sau khi gửi, script theo dõi trạng thái Gemini mà không liên tục cuộn/quét toàn bộ
 mã nguồn. Nội dung chỉ được lấy lại khi thay đổi; đủ 10 phần và ổn định thì lưu ngay
