@@ -129,7 +129,7 @@ def write_parts(parts: dict[str, str], output: Path) -> None:
         shutil.rmtree(temporary)
 
 
-RESPONSE_STATE = r"""({prompt, revision = null, refresh = false, reveal = false, inspect = false}) => {
+TURN_HELPERS = r"""
     const visible = el => {
         const style = getComputedStyle(el);
         if (style.visibility === 'hidden' || style.display === 'none') return false;
@@ -139,8 +139,40 @@ RESPONSE_STATE = r"""({prompt, revision = null, refresh = false, reveal = false,
     const normalize = text => text.replace(/\s+/g, ' ').trim();
     const users = [...document.querySelectorAll('user-query, .user-query-container, [data-message-author-role="user"]')]
         .filter(visible).filter(el => !el.parentElement?.closest('user-query, .user-query-container, [data-message-author-role="user"]'));
-    const matching = users.filter(el => normalize(el.textContent).includes(normalize(prompt)));
-    const user = matching.length === 1 && matching[0] === users[users.length - 1] ? matching[0] : null;
+    const latest = users[users.length - 1];
+    const matchesPrompt = el => !!el && normalize(el.textContent).includes(normalize(prompt));
+    function submittedUser(token) {
+        if (!token) {
+            const matching = users.filter(matchesPrompt);
+            return matching.length === 1 && matching[0] === latest ? latest : null;
+        }
+        const submission = window.__geminiSubmission;
+        if (!submission || submission.token !== token || submission.prompt !== prompt) return null;
+        if (!submission.user) {
+            // Anchor to the last turn BEFORE Send. Repeated prompts and filenames
+            // in earlier problems must never acknowledge a new submission.
+            const before = submission.before;
+            if (before && !users.includes(before)) return null;
+            const added = users.slice(before ? users.indexOf(before) + 1 : 0);
+            if (added.length !== 1 || !matchesPrompt(added[0])) return null;
+            submission.user = added[0];
+        }
+        // A follow-up or navigation must not silently change the selected answer.
+        return submission.user === latest && matchesPrompt(latest) ? latest : null;
+    }
+"""
+
+
+BEGIN_SUBMISSION = r"""({prompt}) => {""" + TURN_HELPERS + r"""
+    const token = crypto.randomUUID();
+    window.__geminiSubmission = {token, prompt, before: latest || null, user: null};
+    return token;
+}"""
+
+
+RESPONSE_STATE = r"""({prompt, revision = null, refresh = false, reveal = false, inspect = false, turn = null}) => {
+""" + TURN_HELPERS + r"""
+    const user = submittedUser(turn);
     let roots = [];
     for (const selector of ['model-response', '.model-response-text', '[data-message-author-role="assistant"]']) {
         roots = [...document.querySelectorAll(selector)].filter(visible).filter(root =>
@@ -160,7 +192,9 @@ RESPONSE_STATE = r"""({prompt, revision = null, refresh = false, reveal = false,
             [...root.querySelectorAll('.model-response-text[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]')].some(visible));
     const busy = !!stop || streaming;
     const error = [...document.querySelectorAll('[role="alert"]')].filter(visible).map(el => el.innerText)
-        .filter(text => /error|failed|unable|limit|lỗi|không thể|giới hạn/i.test(text)).join('\n');
+        .filter(text => /error|failed|unable|limit|lỗi|không thể|giới hạn/i.test(text)).join('\n') ||
+        (turn && window.__geminiSubmission?.token !== turn
+            ? 'Mất dấu lượt gửi sau khi trang thay đổi hoặc tải lại; kiểm tra chat trước khi gửi lại.' : '');
     const state = {url: location.href, user: !!user, response: !!root, busy, events: null, revision: null, error};
     if (inspect) {
         // Sample progress only for the 15-second heartbeat. Never send the
@@ -245,7 +279,7 @@ def conversation_key(url: str) -> str:
     return match[1]
 
 
-def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
+def wait_for_parts(page, prompt: str, timeout: float, *, turn: str | None = None) -> dict[str, str]:
     from playwright.sync_api import Error as PlaywrightError
 
     expected = conversation_key(page.url)
@@ -272,7 +306,7 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
             refresh = (result is None and idle_since is not None and
                        time.monotonic() >= max(idle_since + 2, next_refresh))
             inspect = time.monotonic() >= next_inspection
-            snapshot = page.evaluate(RESPONSE_STATE, {"prompt": prompt, "revision": revision,
+            snapshot = page.evaluate(RESPONSE_STATE, {"prompt": prompt, "revision": revision, "turn": turn,
                                                        "refresh": refresh, "reveal": refresh, "inspect": inspect})
             if refresh:
                 next_refresh = time.monotonic() + 2

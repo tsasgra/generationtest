@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare images, open fresh Gemini web chats and attach the images."""
+"""Prepare images and send each problem to the selected Gemini conversation."""
 from __future__ import annotations
 
 import argparse
@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--response-timeout", type=positive_number, default=600,
                         help="Thời gian chờ Gemini hoàn tất đủ 10 Part để lưu vào problem, giây.")
     parser.add_argument("--batch-size", type=int, choices=range(1, 11), default=10,
-                        help="Chỉ dùng với --input: số ảnh mỗi chat (1–10). img/img1–img/img10 luôn gửi cả thư mục trong một chat.")
+                        help="Chỉ dùng với --input: số ảnh mỗi lượt gửi (1–10). img/img1–img/img10 luôn gửi cả thư mục trong một lượt.")
     parser.add_argument("--max-file-mb", type=positive_number, default=20, help="Giới hạn MiB mỗi PNG sau chuyển đổi.")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help=f"Nội dung gửi kèm ảnh; mặc định: {DEFAULT_PROMPT}.")
     parser.add_argument("--keep-images", action="store_true", help="Giữ ảnh trong thư mục nguồn; mặc định chuyển vào problem tương ứng trong thư mục img.")
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
                     images = prepare_images(files, Path(directory), args.max_file_mb, skip_invalid=True)
                     for item in images:
                         print(f"{item.source.name} → {item.upload.name}: {item.note}")
-                    print(f"{len(images)} ảnh; {(len(images) + args.batch_size - 1) // args.batch_size} chat mới.")
+                    print(f"{len(images)} ảnh; {(len(images) + args.batch_size - 1) // args.batch_size} lượt gửi vào chat đã chỉ định.")
                 else:
                     tasks = []
                     for number, folder in enumerate(numbered_folders(ROOT), 1):
@@ -97,8 +97,8 @@ def main(argv: list[str] | None = None) -> int:
                             continue
                         if len(images) > 10:
                             raise ImageInputError(
-                                f"{folder.name} có {len(images)} ảnh hợp lệ, vượt giới hạn 10 ảnh/chat. "
-                                "Giảm còn tối đa 10 ảnh; không tự tách một bài thành nhiều chat."
+                                f"{folder.name} có {len(images)} ảnh hợp lệ, vượt giới hạn 10 ảnh/lượt gửi. "
+                                "Giảm còn tối đa 10 ảnh; không tự tách một bài thành nhiều lượt gửi."
                             )
                         for item in images:
                             print(f"img/{folder.name}/{item.source.name} → {item.upload.name}: {item.note}")

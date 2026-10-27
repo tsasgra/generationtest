@@ -6,10 +6,10 @@
 rồi chạy **`python pipeline.py gemini`** một lần. Thư mục **`img/`** nằm cạnh script;
 10 thư mục con `img1` đến `img10` được tạo lại nếu thiếu. Mỗi thư mục có thể chứa nhiều ảnh của cùng một bài, tối đa **10 ảnh**.
 Script chạy **tối đa 10 bài, mỗi lần một bài**, bỏ qua thư mục trống hoặc không tìm
-thấy ảnh hợp lệ (chỉ có file rỗng, file hỏng hoặc file không phải ảnh). Mỗi bài dùng
-một chat mới, gửi toàn bộ ảnh hợp lệ trong thư mục kèm đúng một dòng prompt
-`apply polygon setter skill`. Các bài dùng những tab riêng trong cùng
-một trình duyệt và phiên đăng nhập Google. Mỗi tab tự chờ ảnh tải xong mới submit,
+thấy ảnh hợp lệ (chỉ có file rỗng, file hỏng hoặc file không phải ảnh). Mỗi bài gửi
+toàn bộ ảnh hợp lệ trong thư mục vào [cùng chat Gemini](https://gemini.google.com/app/744f177958be7e8d),
+kèm đúng một dòng prompt `apply polygon setter skill`.
+Script dùng lại tab của mình và phiên đăng nhập Google, chờ ảnh tải xong mới submit,
 chờ Gemini hoàn tất **10 Part**, xác nhận chat đã lưu, ghi đủ 10 file vào
 **`problem/problemN/`** rồi xử lý ảnh gốc của bài đó. Bài hiện tại lưu xong mới bắt đầu bài tiếp theo.
 Start tự dừng/dọn phiên cũ trước khi chạy. Sau khi tất cả bài đã kết thúc, script
@@ -43,10 +43,11 @@ cài đặt**. Khi thiếu thư viện, Start gọi pip để bổ sung; dòng `
 satisfied` nghĩa là package đó đã có sẵn. Bước reset trước/sau lượt chạy và chế
 độ `--stop` đều giữ nguyên môi trường Python này.
 
-Script chờ giao diện chat mới ổn định, hỗ trợ cả `/app` và đường dẫn theo tài khoản
-như `/u/0/app`. Nếu Gemini khôi phục chat cũ, script bấm **New chat** rồi chờ chat
-trống trước khi thêm ảnh. Nội dung lịch sử ẩn và ký tự trắng của trình soạn thảo
-không bị tính nhầm thành một cuộc trò chuyện đang có nội dung.
+Script mở đúng chat `744f177958be7e8d`, hỗ trợ cả đường dẫn theo tài khoản
+như `/u/0/app/744f177958be7e8d`. Lịch sử chat được giữ lại. Script chờ lịch sử tải
+xong và ô soạn thảo sẵn sàng trước khi thêm ảnh; không bấm **New chat**.
+Nếu tài khoản không mở được chat hoặc Gemini chuyển về trang chủ, script báo lỗi
+và giữ ảnh. Hãy đăng nhập đúng tài khoản có quyền mở đường dẫn này.
 
 Lần sau chỉ cần thêm ảnh vào `img/img1` đến `img/img10` và chạy lại. Phiên đăng nhập được giữ trong
 `.gemini-browser-native/chrome` hoặc `.gemini-browser-native/edge`, giống nhánh `copy_info_on_gemini`.
@@ -110,7 +111,7 @@ Chỉ cần chạy **`python pipeline.py gemini`**, không cần chọn Python h
 3. Mở trang đăng nhập Google `accounts.google.com/ServiceLogin`, trỏ về Gemini.
    Bạn tự nhập tài khoản trong giao diện Google; script chờ tab mới quay về Gemini.
 4. **Sau bước này** mới khởi động Playwright và kết nối qua CDP. Script tiếp tục chờ
-   ô chat và nút tài khoản Google để xác nhận đã đăng nhập, mở chat mới, tải và gửi ảnh.
+   ô chat và nút tài khoản Google để xác nhận đã đăng nhập, mở chat đã chỉ định, tải và gửi ảnh.
    Chỉ thấy ô chat của phiên khách hoặc quay về URL Gemini chưa đủ để bắt đầu tải ảnh.
 
 Cách này dùng Chrome/Edge của máy, không tải hoặc mở Chromium đi kèm Playwright.
@@ -131,9 +132,9 @@ cửa sổ Chrome/Edge cá nhân không thuộc profile này.
 
 ## Khi nào ảnh bị xóa?
 
-Mỗi thư mục `img/img1` đến `img/img10` là **một bài**, tối đa **10 ảnh**, được gửi vào một chat mới, kèm nội dung mặc định
+Mỗi thư mục `img/img1` đến `img/img10` là **một bài**, tối đa **10 ảnh**, được gửi thành một lượt trong chat đã chỉ định, kèm nội dung mặc định
 `apply polygon setter skill`, chỉ đúng một dòng này, không thêm nội dung khác.
-Không trộn ảnh giữa hai thư mục hoặc tự tách một bài thành nhiều chat. Nếu một
+Không trộn ảnh giữa hai thư mục hoặc tự tách một bài thành nhiều lượt gửi. Nếu một
 thư mục có hơn 10 ảnh hợp lệ, script báo lỗi trước khi mở trình duyệt, giữ nguyên ảnh.
 Trước khi bấm Gửi/submit, script phải thấy đủ
 ảnh xem trước đã tải được, không còn tiến trình/trạng thái đang tải hoặc xử lý và
@@ -148,6 +149,10 @@ ngắt bằng khoảng nghỉ **0,8 giây**. Sau khi nhập prompt, script kiể
 Sau khi bấm Gửi, script chờ dấu hiệu Gemini đã nhận tin nhắn ngay, không nghỉ cố định thêm.
 
 Sau khi submit, script giữ chat mở để Gemini trả lời, **không tải lại trang**.
+Ngay trước khi bấm Gửi, script đánh dấu cuối lịch sử hiện tại. Chỉ tin nhắn mới
+sau mốc đó được dùng để xác nhận ảnh và lấy phản hồi. Prompt và tên ảnh trùng với
+bài trước không làm script lấy nhầm kết quả cũ. Mỗi bài vẫn lưu vào đúng thư mục
+`problem/problemN/` riêng.
 Trong lúc đang sinh, script chỉ kiểm tra trạng thái và lỗi, không quét toàn bộ các
 khối code hoặc cuộn liên tục. Trạng thái được đọc **mỗi giây**; mỗi 15 giây chỉ lấy
 thêm số ký tự/khối code và dấu vân tay nội dung để báo tiến độ, không trả toàn bộ
@@ -175,8 +180,8 @@ Chrome/Edge vẫn dùng tùy chọn hạn chế giảm nhịp timer/renderer khi
 bị terminal che. Các thay đổi chỉ áp dụng phiên trình duyệt của script, không
 làm tăng tốc xử lý trên máy chủ Gemini. Máy cần còn thức, có mạng và tiến trình
 script/trình duyệt còn mở; Stop và timeout vẫn hoạt động bình thường.
-Tab trang chủ sau đăng nhập được dùng lại. Các bài kế tiếp mở chat mới trong
-cùng tab của script thay vì tích lũy thêm tab Gemini; lịch sử chat vẫn nằm trên Gemini.
+Tab đăng nhập được dùng lại để mở chat đã chỉ định. Các bài kế tiếp tiếp tục gửi
+vào cùng chat và dùng lại tab của script; lịch sử các bài vẫn nằm trên Gemini.
 
 - Chỉ xóa file thuộc nhóm đã gửi và có nội dung/thông tin file khớp bản đã tải.
   File mới thêm vào các thư mục ảnh, file thay đổi trong lúc chạy và `.gitkeep` được giữ lại.
@@ -188,7 +193,7 @@ cùng tab của script thay vì tích lũy thêm tab Gemini; lịch sử chat v�
   `--keep-images` giữ cả ảnh thành công, nên chạy lại sẽ gửi lại những bài đó.
 - File không phải ảnh, hỏng hoặc chưa hỗ trợ được bỏ qua và giữ nguyên; ảnh hợp lệ
   khác vẫn được xử lý. Thư mục trống hoặc không có ảnh hợp lệ được bỏ qua để chạy
-  thư mục kế tiếp, không tạo chat và không thay kết quả cũ của thư mục đã bỏ qua.
+  thư mục kế tiếp, không gửi tin nhắn và không thay kết quả cũ của thư mục đã bỏ qua.
   Ví dụ `img/img2` không có ảnh thì tiếp tục `img/img3`, lưu vào `problem/problem3`.
   Nếu cả 10 thư mục không có ảnh hợp lệ, script kết thúc bình thường, không mở trình duyệt.
 - GIF động/TIFF nhiều trang chỉ chuyển khung/trang đầu, nên **giữ bản gốc nhiều
@@ -223,13 +228,13 @@ Bộ cũ chỉ được thay khi đã chuẩn bị đủ 10 file mới;
 không ghi dở dang hoặc xóa file lạ trong thư mục đầu ra.
 
 Để dùng một thư mục riêng theo cách cũ, chạy `python pipeline.py gemini --input THU_MUC_ANH_RIENG`.
-Chế độ `--input` chia nhóm theo `--batch-size`: một chat lưu trực tiếp trong
-`problem/`, nhiều chat lưu riêng trong `problem/chat_0001/`, `problem/chat_0002/`, ...
+Chế độ `--input` chia nhóm theo `--batch-size`: một lượt gửi lưu trực tiếp trong
+`problem/`, nhiều lượt gửi lưu riêng trong `problem/chat_0001/`, `problem/chat_0002/`, ...
 Khi đã có các thư mục `chat_000N`, những lần sau vẫn dùng cách bố trí đó.
 Nếu `problem/` đã chứa các kết quả `problemN`, hãy dùng hàng đợi mặc định để tiếp tục
 lưu theo bài; chế độ cũ sẽ báo lỗi nếu phải thay thư mục có kết quả lạ.
 
-Mặc định chờ Gemini tối đa **600 giây mỗi chat**. Có thể tăng thời gian:
+Mặc định chờ Gemini tối đa **600 giây mỗi bài**. Có thể tăng thời gian:
 
 ```bat
 python pipeline.py gemini --response-timeout 1800
