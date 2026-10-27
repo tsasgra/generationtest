@@ -7,7 +7,7 @@ import shutil
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from gemini_tool import browser, parts
 from polygon_tool.input import PARTS, parse_problem
@@ -96,6 +96,57 @@ class ResponsePollingTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     self.wait(page, timeout=1)
 
+    def test_busy_skill_uses_one_read_per_second_without_accepting_partial_output(self):
+        page = PollingPage([{'revision': None, 'events': None, 'busy': True}])
+        with self.assertRaisesRegex(ValueError, 'Hết 60 giây'):
+            self.wait(page, timeout=60)
+        self.assertEqual(len(page.arguments), 60)
+        self.assertEqual(sum(argument['inspect'] for argument in page.arguments), 4)
+        self.assertFalse(any(argument['reveal'] for argument in page.arguments))
+
+    def test_timeout_reports_unchanged_content_and_background_tab(self):
+        page = PollingPage([{'revision': None, 'events': None, 'busy': True, 'diagnostic': {
+            'signature': '30:123', 'characters': 30, 'code_blocks': 0,
+            'visibility': 'hidden', 'focused': False, 'online': False, 'busy_source': 'Stop',
+        }}])
+        with self.assertRaisesRegex(ValueError, 'nội dung không đổi khoảng 30s; tab ẩn/nền') as error:
+            self.wait(page, timeout=31)
+        self.assertIn('30 ký tự, 0 khối code', str(error.exception))
+        self.assertIn('Trình duyệt báo mất mạng', str(error.exception))
+        self.assertIn(page.url, str(error.exception))
+
+
+class SequentialBrowserTests(unittest.TestCase):
+    def test_reuses_login_home_and_owned_tab_without_replacing_restored_chats(self):
+        for initial in ('about:blank', 'https://gemini.google.com/app?hl=en',
+                        'https://gemini.google.com/u/2/app', 'https://gemini.google.com/app/old-chat'):
+            with self.subTest(initial=initial), tempfile.TemporaryDirectory() as directory:
+                existing = SimpleNamespace(url=initial, is_closed=lambda: False)
+                created = SimpleNamespace(url='about:blank', is_closed=lambda: False)
+                context = SimpleNamespace(pages=[existing], new_page=Mock(return_value=created))
+                seen = []
+
+                def process(task, page, **options):
+                    seen.append(page)
+                    page.url = f'https://gemini.google.com/app/{task.label}'
+
+                root = Path(directory)
+                tasks = [browser.UploadTask([SimpleNamespace(upload=Path('page.png'))],
+                                            root / f'problem{n}', f'problem{n}') for n in (1, 2)]
+                with patch.object(browser, 'open_browser') as opened, \
+                        patch.object(browser, '_process_task', side_effect=process), \
+                        patch.object(browser, 'check_stop'), redirect_stdout(io.StringIO()):
+                    opened.return_value.__enter__.return_value = context
+                    browser.upload_tasks(tasks, profile=root / 'profile', login_timeout=1,
+                                         upload_timeout=1, prompt=parts.DEFAULT_PROMPT)
+                old_chat = initial.endswith('/old-chat')
+                expected = created if old_chat else existing
+                self.assertTrue(all(page is expected for page in seen))
+                self.assertEqual(len(seen), 2)
+                self.assertEqual(context.new_page.call_count, int(old_chat))
+                if old_chat:
+                    self.assertEqual(existing.url, initial)
+
 
 class ChromiumResponseTests(unittest.TestCase):
     @classmethod
@@ -146,6 +197,21 @@ class ChromiumResponseTests(unittest.TestCase):
             self.assertTrue(state['busy'])
             self.assertIsNone(state['events'])
         self.assertTrue(self.page.evaluate('window.__geminiPartsCache === undefined'))
+        self.assertEqual(self.page.evaluate('window.scrollCalls'), 0)
+
+    def test_streaming_diagnostics_track_changes_without_returning_source(self):
+        first = self.snapshot(inspect=True)
+        self.assertIsNone(first['events'])
+        self.assertTrue(first['busy'])
+        self.assertEqual(first['diagnostic']['busy_source'], 'Stop')
+        self.assertEqual(first['diagnostic']['code_blocks'], 10)
+        self.assertGreater(first['diagnostic']['characters'], 30000)
+        self.assertLess(len(str(first)), 1000)
+        self.assertNotIn('diagnostic', self.snapshot())
+        self.page.locator('pre code').last.evaluate("el => el.textContent = 'int main() { return 1; }'")
+        second = self.snapshot(inspect=True)
+        self.assertNotEqual(second['diagnostic']['signature'], first['diagnostic']['signature'])
+        self.assertIsNone(second['events'])
         self.assertEqual(self.page.evaluate('window.scrollCalls'), 0)
 
     def test_cache_tracks_text_changes_and_replaced_response_roots(self):

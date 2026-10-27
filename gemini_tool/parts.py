@@ -129,7 +129,7 @@ def write_parts(parts: dict[str, str], output: Path) -> None:
         shutil.rmtree(temporary)
 
 
-RESPONSE_STATE = r"""({prompt, revision = null, refresh = false, reveal = false}) => {
+RESPONSE_STATE = r"""({prompt, revision = null, refresh = false, reveal = false, inspect = false}) => {
     const visible = el => {
         const style = getComputedStyle(el);
         if (style.visibility === 'hidden' || style.display === 'none') return false;
@@ -148,20 +148,34 @@ RESPONSE_STATE = r"""({prompt, revision = null, refresh = false, reveal = false}
         if (roots.length) break;
     }
     const root = roots[roots.length - 1];
-    const busy = [...document.querySelectorAll('.stop-button, [data-test-id="stop-button"], button[aria-label]')]
-        .filter(visible).filter(el => !el.matches(':disabled, [aria-disabled="true"]')).some(el => {
+    const stop = [...document.querySelectorAll('.stop-button, [data-test-id="stop-button"], button[aria-label]')]
+        .filter(visible).filter(el => !el.matches(':disabled, [aria-disabled="true"]')).find(el => {
             const label = el.getAttribute('aria-label') || '';
             // Some layouts reuse a button and leave its old stop-button class.
             if (/^(send|send message|submit|gửi|gửi tin nhắn)(\s|$)/i.test(label)) return false;
             return el.matches('.stop-button, [data-test-id="stop-button"]') ||
                 /^(stop (response|generating|generation)|dừng (phản hồi|tạo|trả lời))/i.test(label);
-        }) ||
-        !!root && (root.matches('[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]') ||
+        });
+    const streaming = !!root && (root.matches('[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]') ||
             [...root.querySelectorAll('.model-response-text[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]')].some(visible));
+    const busy = !!stop || streaming;
     const error = [...document.querySelectorAll('[role="alert"]')].filter(visible).map(el => el.innerText)
         .filter(text => /error|failed|unable|limit|lỗi|không thể|giới hạn/i.test(text)).join('\n');
     const state = {url: location.href, user: !!user, response: !!root, busy, events: null, revision: null, error};
-    // While Gemini streams, only inspect readiness. Walking every code block
+    if (inspect) {
+        // Sample progress only for the 15-second heartbeat. Never send the
+        // partial source text over CDP or use this fingerprint to accept output.
+        const text = normalize(root?.textContent || '');
+        let hash = 2166136261;
+        for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+        const pres = root ? [...root.querySelectorAll('pre')].filter(visible) : [];
+        const blocks = pres.length || (root ? [...root.querySelectorAll('code-block, .code-block')]
+            .filter(visible).filter(el => !el.parentElement?.closest('code-block, .code-block')).length : 0);
+        state.diagnostic = {signature: text.length + ':' + (hash >>> 0), characters: text.length,
+            code_blocks: blocks, visibility: document.visibilityState, focused: document.hasFocus(),
+            online: navigator.onLine, busy_source: stop ? 'Stop' : streaming ? 'streaming' : 'none'};
+    }
+    // Between heartbeats, only inspect readiness. Walking every code block
     // and sending its text over CDP on every poll slows down large responses.
     if (busy || !user || !root || error) return state;
     let cache = window.__geminiPartsCache;
@@ -243,17 +257,23 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
     idle_since = None
     next_refresh = 0
     last_status = None
-    last_log = time.monotonic()
+    started = last_log = time.monotonic()
+    next_inspection = started
+    progress_signature = None
+    progress_at = started
+    last_diagnostic = ""
     last_error = "Chưa có câu trả lời đủ 10 Part."
     while time.monotonic() < deadline:
         check_stop()
+        new_diagnostic = ""
         if page.is_closed():
             raise ValueError("Tab Gemini đã đóng trước khi lưu đủ 10 Part vào problem.")
         try:
             refresh = (result is None and idle_since is not None and
                        time.monotonic() >= max(idle_since + 2, next_refresh))
+            inspect = time.monotonic() >= next_inspection
             snapshot = page.evaluate(RESPONSE_STATE, {"prompt": prompt, "revision": revision,
-                                                       "refresh": refresh, "reveal": refresh})
+                                                       "refresh": refresh, "reveal": refresh, "inspect": inspect})
             if refresh:
                 next_refresh = time.monotonic() + 2
         except PlaywrightError:
@@ -268,6 +288,25 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
             raise ValueError("Đã chuyển sang chat khác khi đang chờ 10 Part.")
         if snapshot["error"]:
             raise ValueError(f"Gemini báo lỗi khi tạo 10 Part: {snapshot['error']}")
+        if inspect:
+            now = time.monotonic()
+            next_inspection = now + 15
+            diagnostic = snapshot.get("diagnostic")
+            if diagnostic is not None:
+                if diagnostic["signature"] != progress_signature:
+                    progress_signature = diagnostic["signature"]
+                    progress_at = now
+                window = ("tab ẩn/nền" if diagnostic["visibility"] != "visible" else
+                          "tab hiện, cửa sổ không có focus" if not diagnostic["focused"] else
+                          "tab đang có focus")
+                last_diagnostic = (
+                    f"Đã chờ {now - started:.0f}s; vùng phản hồi: {diagnostic['characters']} ký tự, "
+                    f"{diagnostic['code_blocks']} khối code; nội dung không đổi khoảng {now - progress_at:.0f}s; "
+                    f"{window}; tín hiệu: {diagnostic['busy_source']}."
+                )
+                if not diagnostic["online"]:
+                    last_diagnostic += " Trình duyệt báo mất mạng."
+                new_diagnostic = last_diagnostic
         if snapshot["busy"] or not snapshot["user"] or snapshot["revision"] is None:
             stable_since = None
             idle_since = None
@@ -301,12 +340,17 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
                 if time.monotonic() - stable_since >= 2:
                     return result
                 status = "Đã thấy 10 Part; đang chờ nội dung ổn định..."
-        if status != last_status or time.monotonic() - last_log >= 15:
-            print(status, flush=True)
+        if new_diagnostic or status != last_status or time.monotonic() - last_log >= 15:
+            print(f"{status} {new_diagnostic}" if new_diagnostic else status, flush=True)
             last_status = status
             last_log = time.monotonic()
-        page.wait_for_timeout(200)
+        # Streaming may take minutes while a skill runs. One DOM read/second is
+        # enough; retain fast polling for the final two-second stability check.
+        interval = 1000 if snapshot["busy"] or snapshot["revision"] is None else 200
+        remaining = max(0, (deadline - time.monotonic()) * 1000)
+        page.wait_for_timeout(min(interval, remaining))
     raise ValueError(
         f"Hết {timeout:g} giây chờ 10 Part: {last_error} "
-        f"Chat: {page.url}. Giữ ảnh gốc và bộ problem cũ; kiểm tra lịch sử Gemini trước khi gửi lại."
+        f"{last_diagnostic} Chat: {page.url}. "
+        "Giữ ảnh gốc và bộ problem cũ; kiểm tra lịch sử Gemini trước khi gửi lại."
     )

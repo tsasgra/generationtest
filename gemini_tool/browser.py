@@ -156,6 +156,7 @@ def new_chat(page, timeout: float):
     from playwright.sync_api import Error as PlaywrightError
 
     check_stop()
+    page.bring_to_front()
     page.goto(GEMINI_URL, wait_until="commit", timeout=min(10000, timeout * 1000))
     deadline = time.monotonic() + timeout
     wait_for_editor(page, timeout)
@@ -501,6 +502,7 @@ def _process_task(task: UploadTask, page, *, login_timeout: float, upload_timeou
         keep_tabs_open([page])
         return
     send_prompt(page, prompt, paths, upload_timeout)
+    page.bring_to_front()
     print(f"{task.label}: đã gửi ảnh vào {page.url}; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
     parts = wait_for_parts(page, prompt, response_timeout)
     verify_saved_upload(page, prompt, paths, upload_timeout)
@@ -558,7 +560,7 @@ def upload_tasks(tasks: list[UploadTask], *, profile: Path,
     # below still catch a destination changed after this shared preflight.
     for task in tasks:
         _validate_task(task, attach_only)
-    pages = []
+    page = None
     try:
         with open_browser(profile, login_timeout) as context:
             print("Đã kết nối Chrome/Edge sau bước đăng nhập Gemini.")
@@ -566,12 +568,20 @@ def upload_tasks(tasks: list[UploadTask], *, profile: Path,
             try:
                 for task in tasks:
                     check_stop()
-                    # Reuse the launcher's empty tab, preserving any restored chats.
-                    if not pages and context.pages and context.pages[0].url == "about:blank":
-                        page = context.pages[0]
-                    else:
-                        page = context.new_page()
-                    pages.append(page)
+                    # The native login tab normally lands on Gemini's home,
+                    # not about:blank. Reuse it instead of loading a second app.
+                    # Later tasks start fresh chats in this same owned tab.
+                    if page is None or page.is_closed():
+                        page = None
+                        for candidate in context.pages:
+                            location = urlsplit(candidate.url)
+                            home = (location.scheme == "https" and location.netloc == "gemini.google.com" and
+                                    re.fullmatch(r"/(?:u/\d+/)?app/?", location.path))
+                            if not candidate.is_closed() and (candidate.url == "about:blank" or home):
+                                page = candidate
+                                break
+                        if page is None:
+                            page = context.new_page()
                     _process_task(task, page, **options)
             except Exception:
                 print("Đã dừng lần chạy lỗi; giữ ảnh chưa xác nhận và đóng phiên trình duyệt này.", file=sys.stderr)

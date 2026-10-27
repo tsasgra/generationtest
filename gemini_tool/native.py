@@ -108,6 +108,10 @@ def start_native_browser(url: str, profile_root: Path) -> tuple[int, Path, set[s
     process = subprocess.Popen([
         str(executable), f"--user-data-dir={profile}",
         "--remote-debugging-address=127.0.0.1", f"--remote-debugging-port={port}",
+        # This native launch bypasses Playwright's usual Chromium defaults.
+        # Keep the response renderer/timers active when the terminal covers it.
+        "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
         "--no-first-run", "--no-default-browser-check", "--new-window", url,
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _ACTIVE_BROWSERS[session_file] = process

@@ -149,7 +149,9 @@ Sau khi bấm Gửi, script chờ dấu hiệu Gemini đã nhận tin nhắn nga
 
 Sau khi submit, script giữ chat mở để Gemini trả lời, **không tải lại trang**.
 Trong lúc đang sinh, script chỉ kiểm tra trạng thái và lỗi, không quét toàn bộ các
-khối code hoặc cuộn liên tục. Khi Gemini ngừng sinh, nội dung được đọc một lần;
+khối code hoặc cuộn liên tục. Trạng thái được đọc **mỗi giây**; mỗi 15 giây chỉ lấy
+thêm số ký tự/khối code và dấu vân tay nội dung để báo tiến độ, không trả toàn bộ
+mã nguồn đang sinh về Python. Khi Gemini ngừng sinh, nội dung được đọc một lần;
 các lần kiểm tra tiếp theo dùng lại dữ liệu nếu nội dung chưa thay đổi. Nếu Part 10
 hoặc phần khác còn cập nhật, script đọc lại và chờ ổn định từ đầu.
 Nếu lần đọc đầu chưa đủ, script đọc lại DOM mỗi hai giây và cuộn đến cuối phản hồi
@@ -163,6 +165,13 @@ script xác nhận ảnh trong chat hiện tại rồi ghi trọn bộ 10 file. 
 câu trả lời trên máy chủ Gemini vẫn phụ thuộc dịch vụ và nội dung bài.
 Chế độ Gemini riêng chỉ chuyển ảnh sau khi ghi file thành công; luồng chung
 `start.bat` chờ bài hoàn tất trên Polygon rồi mới chuyển ảnh.
+
+Script đưa tab bài đang xử lý lên trước khi mở chat và sau khi gửi. Chrome/Edge
+được mở với tùy chọn hạn chế giảm nhịp timer/renderer khi tab chạy nền hoặc bị
+cửa sổ terminal che. Các tùy chọn này chỉ tác động trình duyệt của script,
+không làm tăng tốc phần xử lý skill trên máy chủ Gemini.
+Tab trang chủ sau đăng nhập được dùng lại. Các bài kế tiếp mở chat mới trong
+cùng tab của script thay vì tích lũy thêm tab Gemini; lịch sử chat vẫn nằm trên Gemini.
 
 - Chỉ xóa file thuộc nhóm đã gửi và có nội dung/thông tin file khớp bản đã tải.
   File mới thêm vào các thư mục ảnh, file thay đổi trong lúc chạy và `.gitkeep` được giữ lại.
@@ -228,8 +237,19 @@ Chế độ Gemini riêng giữ các bộ `problem` hoàn thành qua Start/Stop.
 Nếu Gemini đã trả xong nhưng chưa thấy file, terminal phân biệt ba tình huống:
 chưa nhận diện được tin nhắn chứa prompt, chưa nhận diện được vùng câu trả lời,
 hoặc giao diện vẫn báo Stop/streaming. Khi đọc được nội dung, log chỉ rõ Part còn
-thiếu hoặc khối code chưa hợp lệ. Trạng thái được nhắc lại mỗi 15 giây; URL chat
-được in sau khi gửi và khi hết thời gian để đối chiếu đúng cuộc trò chuyện.
+thiếu hoặc khối code chưa hợp lệ. Mỗi 15 giây, log ghi số ký tự/khối code đã thấy,
+khoảng thời gian nội dung hiển thị không đổi, tab hiện/ẩn và cửa sổ có focus hay
+không; nếu trình duyệt báo offline thì ghi rõ. URL chat được in sau khi gửi và
+khi hết thời gian để đối chiếu đúng cuộc trò chuyện. Số ký tự không đổi chưa đủ
+để kết luận Gemini bị treo: skill có thể đang xử lý mà chưa cập nhật giao diện.
+
+Để so sánh với thao tác thủ công, dùng cùng tài khoản, chế độ model, prompt và
+bản PNG mà script gửi (luồng chung lưu trong `.pipeline-state/images/imgN/`).
+Profile riêng của script được dọn trạng thái trang mỗi lượt Start; phiên bạn dùng
+hằng ngày có thể có cài đặt/cache khác. Có thể dùng
+`python pipeline.py gemini --attach-only` để script mở đúng trình duyệt và đính kèm
+ảnh rồi bạn tự nhập prompt/bấm Gửi. Chế độ này phục vụ đối chiếu, không xuất file
+hay tải lên Polygon; ảnh gốc được giữ nguyên.
 
 Mỗi lần chỉ xử lý một bài. `--workers` được giữ để tương thích lệnh cũ và chỉ nhận `1`:
 
