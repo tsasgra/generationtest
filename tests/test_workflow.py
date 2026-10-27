@@ -20,6 +20,7 @@ class PolygonFixture:
         self.fail_once = None
         self.lose_once = None
         self.package_state = 'READY'
+        self.package_issues = []
         self.info = {'timeLimit': 1000, 'memoryLimit': 256, 'inputFile': '', 'outputFile': ''}
 
     def call(self, method, params=None, *, mutation=False, raw=False):
@@ -39,7 +40,7 @@ class PolygonFixture:
             if method == 'problem.tests':
                 return deepcopy(self.tests)
             if method == 'problem.cautions':
-                return {'packageReadinessIssues': []}
+                return {'packageReadinessIssues': deepcopy(self.package_issues)}
             if method == 'problem.packages':
                 return deepcopy(self.packages)
             raise AssertionError(f'Unexpected content verification request: {method}')
@@ -118,6 +119,50 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('snapshot', state)
         self.assertTrue(state['completed'])
         self.assertEqual(state['upload_receipts']['statement'], digest(self.workflow().upload_requests()['statement']))
+        final_writes = [(name, params) for name, params, write in self.api.calls if write][-3:]
+        self.assertEqual([name for name, _ in final_writes],
+                         ['problem.setAccess', 'problem.commitChanges', 'problem.buildPackage'])
+        self.assertEqual(final_writes[0][1], {'problemId': 123, 'login': 'codeforces', 'accessType': 'READ'})
+        self.assertEqual(result['revision'], 2)
+        self.assertEqual(self.api.packages[0]['revision'], result['revision'])
+
+    def test_access_failure_blocks_commit_and_package_until_resume(self):
+        self.api.fail_once = 'problem.setAccess'
+        with self.assertRaises(APIError):
+            self.workflow().run(self.resolver)
+        self.assertEqual(self.writes()['problem.commitChanges'], 0)
+        self.assertEqual(self.writes()['problem.buildPackage'], 0)
+        self.assertEqual(json.loads(self.path.read_text())['pending'], 'access')
+        self.workflow().run(self.resolver)
+        self.assertEqual(self.writes()['problem.setAccess'], 2)
+        self.assertEqual(self.writes()['problem.commitChanges'], 1)
+        self.assertEqual(self.writes()['problem.buildPackage'], 1)
+
+    def test_commit_failure_blocks_package_until_resume(self):
+        self.api.fail_once = 'problem.commitChanges'
+        with self.assertRaises(APIError):
+            self.workflow().run(self.resolver)
+        self.assertEqual(self.writes()['problem.setAccess'], 1)
+        self.assertEqual(self.writes()['problem.buildPackage'], 0)
+        self.assertEqual(json.loads(self.path.read_text())['pending'], 'commit')
+        self.workflow().run(self.resolver)
+        self.assertEqual(self.writes()['problem.setAccess'], 1)
+        self.assertEqual(self.writes()['problem.commitChanges'], 2)
+        self.assertEqual(self.writes()['problem.buildPackage'], 1)
+
+    def test_package_issue_does_not_prevent_committing_uploaded_changes(self):
+        self.api.package_issues = [{'type': 'FIXTURE_PACKAGE_ISSUE', 'message': 'Package not ready'}]
+        with self.assertRaisesRegex(WorkflowError, 'Polygon chặn package'):
+            self.workflow().run(self.resolver)
+        self.assertEqual(self.writes()['problem.setAccess'], 1)
+        self.assertEqual(self.writes()['problem.commitChanges'], 1)
+        self.assertEqual(self.writes()['problem.buildPackage'], 0)
+        self.assertTrue(json.loads(self.path.read_text())['committed'])
+        self.assertFalse(self.api.problem['modified'])
+        self.api.package_issues.clear()
+        self.workflow().run(self.resolver)
+        self.assertEqual(self.writes()['problem.commitChanges'], 1)
+        self.assertEqual(self.writes()['problem.buildPackage'], 1)
 
     def test_api_error_stops_and_resume_retries_only_unacknowledged_steps(self):
         self.api.fail_once = 'problem.setChecker'

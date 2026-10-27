@@ -175,10 +175,14 @@ Một lần chạy thành công thực hiện:
 1. Tạo bài mới, ghi problem ID vào `run_state.json` ngay khi nhận được.
 2. Lưu statement `vietnamese`, tải `checker.cpp`, gọi `problem.setChecker` để chọn file này làm checker, tải `gen.cpp` và lưu `solution.cpp` với tag `MA`. Ghi nhận từng bước ngay khi API trả thành công, không tải nội dung lại.
 3. Lưu script test, lấy danh sách test thực tế từ Polygon một lần để xác định chỉ số sample rồi cập nhật cờ Example. Không truy vấn lại các cờ sau khi gửi.
-4. Gửi quyền READ cho đúng login `codeforces`; các tài khoản khác không bị sửa.
-5. Xử lý cảnh báo chặn đóng gói của Polygon, commit và xác nhận revision, yêu cầu package Standard với `full=false`, `verify=true`. Đây là bước build của Polygon, không phải tải lại nội dung để đối chiếu.
+4. **Manage Access:** gửi quyền READ cho đúng login `codeforces`; các tài khoản khác không bị sửa. API lỗi thì dừng trước commit/package.
+5. **Commit Changes:** gọi `problem.commitChanges` và xác nhận revision mới đã commit. Sau đó mới kiểm tra điều kiện đóng gói và gọi `problem.buildPackage` tạo package Standard với `full=false`, `verify=true`. Lỗi commit thì không tạo package. Vấn đề đóng gói không còn chặn việc commit nội dung trước đó. Đây là bước build của Polygon, không phải tải lại nội dung để đối chiếu.
 6. Poll đúng package ID của revision đó đến `READY`; trạng thái `FAILED` luôn là lỗi.
 7. Lấy link chính thức, lưu `result.json` và `problem_url.txt`.
+
+Hai bước Manage Access và Commit Changes được chạy qua API, nên script không cần
+mở các màn hình tương ứng trên web. Terminal ghi rõ `Manage Access`, `Commit Changes`
+và `Packages` theo thứ tự; Resume dùng lại các bước đã có xác nhận trong checkpoint.
 
 JSON kết quả gồm problem ID, tên định danh, tên hiển thị, ngôn ngữ, số test, sample indices, quyền `codeforces`, revision, package ID/trạng thái, link bài và giới hạn/tên file thực tế. Thông báo tiến độ nằm ở stderr. Để stdout chỉ có link sau khi thành công:
 

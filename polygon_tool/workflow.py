@@ -248,11 +248,13 @@ class Workflow:
         receipts = self.state.setdefault('upload_receipts', {})
         pending = self.state.get('pending')
         if receipts.get(label) == receipt and pending != label:
+            if label == 'access':
+                self.log('Manage Access: quyền codeforces đã có ghi nhận trong checkpoint.')
             return False
         if pending and pending != label:
             raise WorkflowError(f'Chưa hoàn tất {label}; đang chờ xử lý {pending}.')
         self.check_revision()
-        self.log(f'Đang lưu: {label}')
+        self.log('Manage Access: cấp quyền READ cho codeforces.' if label == 'access' else f'Đang lưu: {label}')
         self.state['pending'] = label
         self.save()
         # API errors leave the intent intact. Named saves can be retried;
@@ -301,6 +303,7 @@ class Workflow:
         if self.action('access', *requests['access']):
             self.state['codeforces_access'] = requests['access'][1]['accessType']
             self.save()
+            self.log('Manage Access: API đã xác nhận codeforces có quyền READ.')
 
     def commit(self):
         self.step = 'commit'
@@ -309,6 +312,7 @@ class Workflow:
             if meta['revision'] == self.state['revision'] + 1 and not meta['modified']:
                 self.state.update(revision=meta['revision'], committed=True, pending=None)
                 self.save()
+                self.log(f'Commit Changes: đã khôi phục commit revision {meta["revision"]}.')
                 return
             if meta['revision'] != self.state['revision'] or not meta['modified']:
                 raise WorkflowError('Không xác định được commit bị gián đoạn; kiểm tra revision trên Polygon.')
@@ -317,13 +321,13 @@ class Workflow:
         if self.state.get('committed'):
             if meta['modified']:
                 raise WorkflowError('Có thay đổi chưa commit sau checkpoint đã commit.')
+            self.log(f'Commit Changes: revision {meta["revision"]} đã commit theo checkpoint.')
             return
-        cautions = self.read('problem.cautions')
-        blockers = [i for i in cautions.get('packageReadinessIssues', []) if i['type'] != 'HAS_MODIFICATIONS']
-        if blockers:
-            raise WorkflowError('Polygon chưa sẵn sàng: ' + '; '.join(i['message'] for i in blockers))
+        # Package readiness is checked in package(), after committing. A
+        # packaging issue must not prevent saving the uploaded working copy.
         self.state['pending'] = 'commit'
         self.save()
+        self.log('Commit Changes: đang lưu thay đổi vào repository Polygon.')
         result = self.write('problem.commitChanges', minorChanges=True, message='Upload with polygon_upload')
         if not isinstance(result, dict) or result.get('conflictOccurred') or not result.get('committed'):
             raise WorkflowError('Commit không được xác nhận: ' + str(result))
@@ -332,7 +336,7 @@ class Workflow:
             raise WorkflowError('Commit chưa tạo revision mới sạch; giữ checkpoint.')
         self.state.update(revision=meta['revision'], committed=True, pending=None)
         self.save()
-        self.log(f'Đã commit revision {meta["revision"]}.')
+        self.log(f'Commit Changes: đã commit revision {meta["revision"]}.')
 
     def package(self):
         self.step = 'package'
@@ -359,6 +363,7 @@ class Workflow:
                 raise WorkflowError('Polygon chặn package: ' + '; '.join(i['message'] for i in blockers))
             self.state.update(pending='build', build_before_ids=[p['id'] for p in packages])
             self.save()
+            self.log(f'Packages: tạo package Standard từ revision {revision} đã commit.')
             result = self.write('problem.buildPackage', full=False, verify=True)
             # Some versions return no result. Reconcile the list, never repeat build.
             if isinstance(result, dict) and isinstance(result.get('id'), int):
