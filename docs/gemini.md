@@ -166,10 +166,15 @@ câu trả lời trên máy chủ Gemini vẫn phụ thuộc dịch vụ và n�
 Chế độ Gemini riêng chỉ chuyển ảnh sau khi ghi file thành công; luồng chung
 `start.bat` chờ bài hoàn tất trên Polygon rồi mới chuyển ảnh.
 
-Script đưa tab bài đang xử lý lên trước khi mở chat và sau khi gửi. Chrome/Edge
-được mở với tùy chọn hạn chế giảm nhịp timer/renderer khi tab chạy nền hoặc bị
-cửa sổ terminal che. Các tùy chọn này chỉ tác động trình duyệt của script,
-không làm tăng tốc phần xử lý skill trên máy chủ Gemini.
+Bạn có thể chuyển tab, chuyển cửa sổ hoặc thu nhỏ Chrome trong lúc chạy.
+Script giữ riêng tab Gemini ở trạng thái hoạt động qua kết nối điều khiển Chrome,
+không gọi lệnh kéo tab lên trước khi mở chat hay sau khi gửi. Chế độ này tồn tại
+suốt bước tải ảnh, gửi prompt, chờ phản hồi và lưu đủ 10 file, rồi được dọn khi
+bài hoàn tất/lỗi/Stop. Tab khác của bạn không bị áp dụng chế độ này.
+Chrome/Edge vẫn dùng tùy chọn hạn chế giảm nhịp timer/renderer khi chạy nền hoặc
+bị terminal che. Các thay đổi chỉ áp dụng phiên trình duyệt của script, không
+làm tăng tốc xử lý trên máy chủ Gemini. Máy cần còn thức, có mạng và tiến trình
+script/trình duyệt còn mở; Stop và timeout vẫn hoạt động bình thường.
 Tab trang chủ sau đăng nhập được dùng lại. Các bài kế tiếp mở chat mới trong
 cùng tab của script thay vì tích lũy thêm tab Gemini; lịch sử chat vẫn nằm trên Gemini.
 
@@ -242,6 +247,8 @@ khoảng thời gian nội dung hiển thị không đổi, tab hiện/ẩn và 
 không; nếu trình duyệt báo offline thì ghi rõ. URL chat được in sau khi gửi và
 khi hết thời gian để đối chiếu đúng cuộc trò chuyện. Số ký tự không đổi chưa đủ
 để kết luận Gemini bị treo: skill có thể đang xử lý mà chưa cập nhật giao diện.
+Trạng thái hoạt động/focus trong log là trạng thái trang nhận từ Chrome; khi chế
+độ chạy nền bật, trang vẫn báo hoạt động dù bạn đang xem tab hoặc cửa sổ khác.
 
 Để so sánh với thao tác thủ công, dùng cùng tài khoản, chế độ model, prompt và
 bản PNG mà script gửi (luồng chung lưu trong `.pipeline-state/images/imgN/`).
@@ -319,6 +326,10 @@ xác nhận không reload. Có kiểm thử nút Send còn class Stop, ảnh con
 khối code không có `pre`, tiêu đề xuống dòng, render muộn và xuất đủ 10 file.
 Các ca Chromium dùng trang mô phỏng chặn mọi request ra ngoài;
 chúng chạy khi máy có Chromium/Chrome hoặc Chromium của Playwright.
+Có ca chuyển sang tab khác, cho tab Gemini render bằng `requestAnimationFrame`,
+thu đủ 10 Part và ghi file trong khi tab kia vẫn được chọn; ca điều hướng, lỗi và
+đóng tab cũng kiểm tra dọn chế độ chạy nền. Để chạy có giao diện trên máy phát triển,
+đặt biến `GEMINI_TEST_HEADED=1` trước lệnh unittest (Linux cần display/Xvfb).
 
 Kiểm thử Stop mô phỏng việc dừng đúng cây tiến trình/profile, PID bị tái sử dụng,
 lỗi quyền truy cập, dọn trạng thái hỏng và giữ ảnh cùng dữ liệu đăng nhập.

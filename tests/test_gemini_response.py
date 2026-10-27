@@ -1,7 +1,8 @@
 """Response polling checks, including Chromium fixtures with no Gemini requests."""
-from contextlib import ExitStack, redirect_stdout
+from contextlib import ExitStack, nullcontext, redirect_stdout
 import html
 import io
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -134,6 +135,7 @@ class SequentialBrowserTests(unittest.TestCase):
                 tasks = [browser.UploadTask([SimpleNamespace(upload=Path('page.png'))],
                                             root / f'problem{n}', f'problem{n}') for n in (1, 2)]
                 with patch.object(browser, 'open_browser') as opened, \
+                        patch.object(browser, 'active_background_page', side_effect=lambda page: nullcontext()), \
                         patch.object(browser, '_process_task', side_effect=process), \
                         patch.object(browser, 'check_stop'), redirect_stdout(io.StringIO()):
                     opened.return_value.__enter__.return_value = context
@@ -159,7 +161,8 @@ class ChromiumResponseTests(unittest.TestCase):
             executable = cls.playwright.chromium.executable_path
         if not executable:
             raise unittest.SkipTest('Install Chromium to run the browser fixtures.')
-        cls.browser = cls.playwright.chromium.launch(executable_path=executable, headless=True)
+        cls.browser = cls.playwright.chromium.launch(
+            executable_path=executable, headless=os.environ.get('GEMINI_TEST_HEADED') != '1')
         cls.addClassCleanup(cls.browser.close)
 
     def setUp(self):
@@ -213,6 +216,71 @@ class ChromiumResponseTests(unittest.TestCase):
         self.assertNotEqual(second['diagnostic']['signature'], first['diagnostic']['signature'])
         self.assertIsNone(second['events'])
         self.assertEqual(self.page.evaluate('window.scrollCalls'), 0)
+
+    def another_selected_tab(self):
+        # Disable Playwright's automatic focus emulation so these assertions
+        # measure our explicit task guard, and the other tab's real selection.
+        session = self.context.new_cdp_session(self.page)
+        session.send('Emulation.setFocusEmulationEnabled', {'enabled': False})
+        other = self.context.new_page()
+        other.goto('https://example.test/another-tab')
+        self.context.new_cdp_session(other).send('Emulation.setFocusEmulationEnabled', {'enabled': False})
+        other.bring_to_front()
+        self.assertTrue(other.evaluate('document.hasFocus()'))
+        self.assertFalse(self.page.evaluate('document.hasFocus()'))
+        return other, session
+
+    def test_background_tab_renders_and_exports_while_another_tab_stays_selected(self):
+        other, session = self.another_selected_tab()
+        self.page.evaluate('''events => {
+            const response = document.querySelector('model-response');
+            response.replaceChildren();
+            window.renderTicks = 0;
+            function render() {
+                if (!document.hidden && document.hasFocus()) {
+                    window.renderTicks++;
+                    for (const event of events) {
+                        const node = document.createElement('part' in event ? 'h3' : 'pre');
+                        node.textContent = 'part' in event ? `Part ${event.part}: section` : event.code;
+                        response.append(node);
+                    }
+                    document.querySelector('.stop-button').remove();
+                } else requestAnimationFrame(render);
+            }
+            requestAnimationFrame(render);
+        }''', response_events())
+        self.page.wait_for_timeout(100)
+        self.assertEqual(self.page.evaluate('window.renderTicks'), 0)
+        # Also cover a tab already frozen before the task guard is installed.
+        session.send('Page.setWebLifecycleState', {'state': 'frozen'})
+        with patch.object(browser, 'check_stop'), patch.object(parts, 'check_stop'), \
+                redirect_stdout(io.StringIO()), browser.active_background_page(self.page):
+            result = parts.wait_for_parts(self.page, parts.DEFAULT_PROMPT, timeout=8)
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'problem1'
+                parts.write_parts(result, output)
+                self.assertEqual(len(list(output.glob('*.txt'))), 10)
+                self.assertEqual(parse_problem(output)['solution'], 'int main() {}')
+            self.assertTrue(other.evaluate('document.hasFocus()'))
+        self.assertFalse(self.page.evaluate('document.hasFocus()'))
+        self.assertTrue(other.evaluate('document.hasFocus()'))
+
+    def test_background_guard_survives_navigation_and_restores_on_error(self):
+        other, _ = self.another_selected_tab()
+        with self.assertRaisesRegex(RuntimeError, 'task stopped'), \
+                patch.object(browser, 'check_stop'), browser.active_background_page(self.page):
+            self.page.goto('https://gemini.google.com/app/next-fixture')
+            self.assertTrue(self.page.evaluate('document.hasFocus() && !document.hidden'))
+            self.assertTrue(other.evaluate('document.hasFocus()'))
+            raise RuntimeError('task stopped')
+        self.assertFalse(self.page.evaluate('document.hasFocus()'))
+        self.assertTrue(other.evaluate('document.hasFocus()'))
+
+    def test_background_guard_cleanup_after_manual_close_preserves_original_error(self):
+        with self.assertRaisesRegex(RuntimeError, 'original error'), \
+                patch.object(browser, 'check_stop'), browser.active_background_page(self.page):
+            self.page.close()
+            raise RuntimeError('original error')
 
     def test_cache_tracks_text_changes_and_replaced_response_roots(self):
         self.stop_streaming()

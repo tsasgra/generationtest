@@ -298,7 +298,7 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
                     progress_at = now
                 window = ("tab ẩn/nền" if diagnostic["visibility"] != "visible" else
                           "tab hiện, cửa sổ không có focus" if not diagnostic["focused"] else
-                          "tab đang có focus")
+                          "trang đang hoạt động")
                 last_diagnostic = (
                     f"Đã chờ {now - started:.0f}s; vùng phản hồi: {diagnostic['characters']} ký tự, "
                     f"{diagnostic['code_blocks']} khối code; nội dung không đổi khoảng {now - progress_at:.0f}s; "

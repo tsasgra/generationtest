@@ -103,6 +103,34 @@ def open_browser(profile: Path, login_timeout: float):
             yield context
 
 
+@contextmanager
+def active_background_page(page):
+    """Keep the owned task tab active without selecting it in the browser UI."""
+    from playwright.sync_api import Error as PlaywrightError
+
+    check_stop()
+    session = page.context.new_cdp_session(page)
+    try:
+        # Apply explicitly rather than depending on a Playwright version's
+        # connection defaults. This keeps visibility/focus-sensitive rendering
+        # alive when the user selects another tab or minimizes the window.
+        session.send("Page.setWebLifecycleState", {"state": "active"})
+        session.send("Emulation.setFocusEmulationEnabled", {"enabled": True})
+        yield
+    finally:
+        try:
+            if not page.is_closed():
+                session.send("Emulation.setFocusEmulationEnabled", {"enabled": False})
+        except PlaywrightError:
+            # Stop or a manual window close can remove the target during cleanup.
+            pass
+        finally:
+            try:
+                session.detach()
+            except PlaywrightError:
+                pass
+
+
 def wait_for_editor(page, timeout: float):
     from playwright.sync_api import Error as PlaywrightError
 
@@ -156,7 +184,6 @@ def new_chat(page, timeout: float):
     from playwright.sync_api import Error as PlaywrightError
 
     check_stop()
-    page.bring_to_front()
     page.goto(GEMINI_URL, wait_until="commit", timeout=min(10000, timeout * 1000))
     deadline = time.monotonic() + timeout
     wait_for_editor(page, timeout)
@@ -502,7 +529,6 @@ def _process_task(task: UploadTask, page, *, login_timeout: float, upload_timeou
         keep_tabs_open([page])
         return
     send_prompt(page, prompt, paths, upload_timeout)
-    page.bring_to_front()
     print(f"{task.label}: đã gửi ảnh vào {page.url}; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
     parts = wait_for_parts(page, prompt, response_timeout)
     verify_saved_upload(page, prompt, paths, upload_timeout)
@@ -582,7 +608,8 @@ def upload_tasks(tasks: list[UploadTask], *, profile: Path,
                                 break
                         if page is None:
                             page = context.new_page()
-                    _process_task(task, page, **options)
+                    with active_background_page(page):
+                        _process_task(task, page, **options)
             except Exception:
                 print("Đã dừng lần chạy lỗi; giữ ảnh chưa xác nhận và đóng phiên trình duyệt này.", file=sys.stderr)
                 raise

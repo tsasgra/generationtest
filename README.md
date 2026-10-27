@@ -86,6 +86,9 @@ Các chế độ từ hai nhánh vẫn được giữ qua CLI Python:
 Chỉ còn một launcher Windows `start.bat`; các file Start/Stop phụ đã được gộp.
 Nhấn Ctrl+C để dừng lượt đang chạy, hoặc dùng `python pipeline.py stop` trên Windows.
 Mở lại Start sẽ dọn checkpoint; chỉ lệnh Python `resume` mới tiếp tục lượt cũ.
+Trong lúc chạy, bạn có thể chuyển tab/cửa sổ hoặc thu nhỏ Chrome. Tab Gemini của
+script được giữ hoạt động ở nền, không tự kéo lên trước khi mở chat hay sau khi
+gửi. Máy vẫn cần còn thức, có mạng và không đóng script/trình duyệt.
 Chế độ Polygon riêng lưu
 checkpoint con trong `run_state.problems/`, kết quả trong `results/`, `result.json` và
 `problem_url.txt`. Cả hai định dạng checkpoint đều được giữ, không tự chuyển đổi lẫn nhau.
