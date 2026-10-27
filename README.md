@@ -18,6 +18,10 @@ Nếu một bài lỗi, luồng dừng tại bài đó; các bài phía sau chư
 
 Prompt mặc định gửi kèm ảnh chỉ gồm một dòng: `apply polygon setter skill`.
 
+Sau khi gửi, script theo dõi trạng thái Gemini mà không liên tục cuộn/quét toàn bộ
+mã nguồn. Nội dung chỉ được lấy lại khi thay đổi; đủ 10 phần và ổn định thì lưu ngay
+trên chat hiện tại, không tải lại cả trang.
+
 Khi tải lên Polygon, script ghi nhận từng bước theo phản hồi thành công của API,
 không tải lại nội dung để đối chiếu. Script vẫn lấy danh sách test để đánh dấu sample,
 commit và chờ package READY trước khi chuyển ảnh và chạy bài tiếp theo.

@@ -129,7 +129,7 @@ def write_parts(parts: dict[str, str], output: Path) -> None:
         shutil.rmtree(temporary)
 
 
-RESPONSE_STATE = r"""prompt => {
+RESPONSE_STATE = r"""({prompt, revision = null}) => {
     const visible = el => !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
     const normalize = text => text.replace(/\s+/g, ' ').trim();
     const users = [...document.querySelectorAll('user-query, .user-query-container, [data-message-author-role="user"]')]
@@ -147,6 +147,21 @@ RESPONSE_STATE = r"""prompt => {
             /^(stop (response|generating|generation)|dừng (phản hồi|tạo|trả lời))/i.test(el.getAttribute('aria-label') || '')) ||
         !!root && (root.matches('[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]') ||
             [...root.querySelectorAll('[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]')].some(visible));
+    const error = [...document.querySelectorAll('[role="alert"]')].filter(visible).map(el => el.innerText)
+        .filter(text => /error|failed|unable|limit|lỗi|không thể|giới hạn/i.test(text)).join('\n');
+    const state = {url: location.href, user: !!user, busy, events: null, revision: null, error};
+    // While Gemini streams, only inspect readiness. Walking every code block
+    // and sending its text over CDP on every poll slows down large responses.
+    if (busy || !user || !root || error) return state;
+    let cache = window.__geminiPartsCache;
+    if (!cache || cache.root !== root || cache.prompt !== prompt) {
+        cache?.observer.disconnect();
+        cache = {root, prompt, id: crypto.randomUUID(), version: 0, dirty: true, events: []};
+        cache.observer = new MutationObserver(() => { cache.version++; cache.dirty = true; });
+        cache.observer.observe(root, {subtree: true, childList: true, characterData: true,
+            attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden']});
+        window.__geminiPartsCache = cache;
+    }
     const events = [];
     function walk(el) {
         if (!visible(el)) return;
@@ -154,21 +169,28 @@ RESPONSE_STATE = r"""prompt => {
             events.push({code: (el.querySelector('code') || el).textContent});
             return;
         }
-        const text = el.textContent.trim();
-        const heading = /^Part\s+(\d+)\s*[:.()\-–—]\s*[^\r\n]+$/i.exec(text);
-        if (heading && !el.querySelector('pre') && text.length < 200) {
-            events.push({part: Number(heading[1])});
-            return;
+        // Containers with code cannot be headings. Avoid concatenating all
+        // their descendant code just to test a short heading expression.
+        if (!el.querySelector('pre')) {
+            const text = el.textContent.trim();
+            const heading = /^Part\s+(\d+)\s*[:.()\-–—]\s*[^\r\n]+$/i.exec(text);
+            if (heading && text.length < 200) {
+                events.push({part: Number(heading[1])});
+                return;
+            }
         }
         for (const child of el.children) walk(child);
     }
-    if (root) {
-        (root.lastElementChild || root).scrollIntoView({block: 'end'});
+    if (cache.dirty) {
         walk(root);
+        cache.events = events;
+        cache.dirty = false;
     }
-    const error = [...document.querySelectorAll('[role="alert"]')].filter(visible).map(el => el.innerText)
-        .filter(text => /error|failed|unable|limit|lỗi|không thể|giới hạn/i.test(text)).join('\n');
-    return {url: location.href, user: !!user, busy, events, error};
+    state.revision = cache.id + ':' + cache.version;
+    // The caller acknowledges its last revision, so a failed CDP read cannot
+    // accidentally lose the only copy of a completed response.
+    if (revision !== state.revision) state.events = cache.events;
+    return state;
 }"""
 
 
@@ -186,6 +208,8 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
     expected = conversation_key(page.url)
     deadline = time.monotonic() + timeout
     previous = None
+    revision = None
+    result = None
     stable_since = None
     last_status = None
     last_error = "Chưa có câu trả lời đủ 10 Part."
@@ -194,34 +218,42 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
         if page.is_closed():
             raise ValueError("Tab Gemini đã đóng trước khi lưu đủ 10 Part vào problem.")
         try:
-            snapshot = page.evaluate(RESPONSE_STATE, prompt)
+            snapshot = page.evaluate(RESPONSE_STATE, {"prompt": prompt, "revision": revision})
         except PlaywrightError:
             if page.is_closed() or (page.context.browser is not None and not page.context.browser.is_connected()):
                 raise ValueError("Mất kết nối Gemini trước khi lưu đủ 10 Part.")
             stable_since = None
+            revision = None
             page.wait_for_timeout(200)
             continue
         if conversation_key(snapshot["url"]) != expected:
             raise ValueError("Đã chuyển sang chat khác khi đang chờ 10 Part.")
         if snapshot["error"]:
             raise ValueError(f"Gemini báo lỗi khi tạo 10 Part: {snapshot['error']}")
-        events = snapshot["events"]
-        if snapshot["busy"] or not snapshot["user"]:
+        if snapshot["busy"] or not snapshot["user"] or snapshot["revision"] is None:
             stable_since = None
+            previous = result = revision = None
             status = "Gemini đang trả lời; tiếp tục chờ đủ 10 Part..."
         else:
-            if events != previous or stable_since is None:
+            events = snapshot["events"]
+            if events is not None:
+                revision = snapshot["revision"]
+                if events != previous:
+                    stable_since = time.monotonic()
+                    result = None
+                    try:
+                        result = parts_from_events(events)
+                    except ValueError as exc:
+                        last_error = str(exc)
+                previous = events
+            if stable_since is None:
                 stable_since = time.monotonic()
-            try:
-                result = parts_from_events(events)
-            except ValueError as exc:
-                last_error = str(exc)
+            if result is None:
                 status = f"Đang chờ 10 Part: {last_error}"
             else:
                 if time.monotonic() - stable_since >= 2:
                     return result
                 status = "Đã thấy 10 Part; đang chờ nội dung ổn định..."
-        previous = events
         if status != last_status:
             print(status, flush=True)
             last_status = status

@@ -142,18 +142,25 @@ tải bên ngoài đều phải kết thúc. Các điều kiện phải ổn đ�
 sau khi điền nội dung gửi kèm; chỉ thấy tên file chưa đủ để submit. Nếu hết
 `--upload-timeout`, script báo lỗi và giữ ảnh, không cố bấm Gửi.
 
-Các thao tác bấm dấu +, chọn Upload files, đưa ảnh vào và điền/gửi prompt được
+Các thao tác bấm dấu +, chọn Upload files, đưa ảnh vào và điền prompt được
 ngắt bằng khoảng nghỉ **0,8 giây**. Sau khi nhập prompt, script kiểm tra lại nội dung
 ô chat còn đúng trước khi bấm Gửi; nếu ô chat bị xóa thì báo lỗi và giữ ảnh.
+Sau khi bấm Gửi, script chờ dấu hiệu Gemini đã nhận tin nhắn ngay, không nghỉ cố định thêm.
 
-Sau khi submit, script giữ chat mở để Gemini trả lời, **không tải lại khi đang sinh**.
+Sau khi submit, script giữ chat mở để Gemini trả lời, **không tải lại trang**.
+Trong lúc đang sinh, script chỉ kiểm tra trạng thái và lỗi, không quét toàn bộ các
+khối code hoặc cuộn liên tục. Khi Gemini ngừng sinh, nội dung được đọc một lần;
+các lần kiểm tra tiếp theo dùng lại dữ liệu nếu nội dung chưa thay đổi. Nếu Part 10
+hoặc phần khác còn cập nhật, script đọc lại và chờ ổn định từ đầu.
 Chỉ khi Gemini ngừng sinh, đủ Part 1–10 và nội dung ổn định ít nhất **hai giây**,
-script mới tải lại chat để xác nhận ảnh đã lưu và ghi trọn bộ 10 file.
-Ảnh gốc chỉ bị xóa sau cả hai bước xác nhận và ghi file thành công.
+script xác nhận ảnh trong chat hiện tại rồi ghi trọn bộ 10 file. Thời gian sinh
+câu trả lời trên máy chủ Gemini vẫn phụ thuộc dịch vụ và nội dung bài.
+Chế độ Gemini riêng chỉ chuyển ảnh sau khi ghi file thành công; luồng chung
+`start.bat` chờ bài hoàn tất trên Polygon rồi mới chuyển ảnh.
 
 - Chỉ xóa file thuộc nhóm đã gửi và có nội dung/thông tin file khớp bản đã tải.
   File mới thêm vào các thư mục ảnh, file thay đổi trong lúc chạy và `.gitkeep` được giữ lại.
-- Lỗi đăng nhập, tải/gửi ảnh, thiếu/trùng Part, ghi file lỗi hoặc không xác nhận được sau khi tải lại:
+- Lỗi đăng nhập, tải/gửi ảnh, thiếu/trùng Part, ghi file lỗi hoặc không xác nhận được ảnh trong chat:
   giữ ảnh chưa xác nhận và trả lỗi. Không tự gửi lại; kiểm tra chat trước khi chạy lại
   nếu lần trước đã bấm Gửi, để tránh gửi trùng.
 - Một bài lỗi sẽ dừng hàng đợi. Kết quả của các bài trước được giữ, ảnh bài lỗi và
@@ -270,9 +277,14 @@ GitHub chỉ chứa mã chạy, thư viện cần cài, file `.bat`, hướng d�
 Với `--input`/`--profile` tự đặt, dùng đường dẫn ngoài repo hoặc bổ sung vào `.gitignore`.
 
 Kiểm thử bằng Chromium trên trang mô phỏng bao gồm menu thêm ảnh hiện tại,
-tải chậm, ảnh xem trước hỏng, nút Gửi bị khóa, lỗi/hạn mức, submit rồi tải lại chat,
+tải chậm, ảnh xem trước hỏng, nút Gửi bị khóa, lỗi/hạn mức, submit và xác nhận chat,
 chế độ chỉ đính kèm và việc giữ/xóa đúng ảnh gốc. File kiểm thử và ảnh mẫu chỉ
 được giữ trong `work/`, không đưa lên GitHub.
+
+Các kiểm thử phản hồi hiện tại nằm trong `tests/test_gemini_response.py`, gồm phần
+đang sinh, code thay đổi muộn, thiếu/trùng Part, đổi chat, bộ nhớ đệm nội dung và
+xác nhận không reload. Các ca Chromium dùng trang mô phỏng chặn mọi request ra ngoài;
+chúng chạy khi máy có Chromium/Chrome hoặc Chromium của Playwright.
 
 Kiểm thử Stop mô phỏng việc dừng đúng cây tiến trình/profile, PID bị tái sử dụng,
 lỗi quyền truy cập, dọn trạng thái hỏng và giữ ảnh cùng dữ liệu đăng nhập.

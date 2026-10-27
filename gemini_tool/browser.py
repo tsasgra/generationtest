@@ -451,7 +451,6 @@ def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
     if editor.inner_text().strip() != prompt.strip():
         raise GeminiBrowserError("Ô chat đã thay đổi hoặc bị xóa nội dung; chưa bấm Gửi, giữ nguyên ảnh gốc.")
     button.click(timeout=min(3000, timeout * 1000))
-    pause_after_action(page)
     arguments = {"editorSelector": EDITOR, "prompt": prompt, "names": [p.name for p in paths]}
     wait_for_saved_message(page, arguments, timeout)
 
@@ -459,14 +458,13 @@ def send_prompt(page, prompt: str, paths: list[Path], timeout: float):
 def verify_saved_upload(page, prompt: str, paths: list[Path], timeout: float):
     try:
         arguments = {"editorSelector": EDITOR, "prompt": prompt, "names": [p.name for p in paths]}
-        # Reload only AFTER the response finished, so fetching the conversation
-        # does not interrupt Gemini while it is still generating the ten parts.
+        # The completed response and received attachments are already visible.
+        # Confirm this page directly instead of reloading the whole conversation.
         check_stop()
-        page.reload(wait_until="commit", timeout=min(10000, timeout * 1000))
         wait_for_saved_message(page, arguments, timeout)
     except Exception as exc:
         raise GeminiBrowserError(
-            "Đã bấm Gửi nhưng chưa xác nhận được đủ ảnh trong chat sau khi tải lại. "
+            "Đã bấm Gửi nhưng chưa xác nhận được đủ ảnh trong cuộc trò chuyện hiện tại. "
             "Giữ nguyên ảnh gốc. Kiểm tra lịch sử chat Gemini trước khi chạy lại để tránh gửi trùng."
         ) from exc
 
@@ -509,7 +507,7 @@ def _process_task(task: UploadTask, page, *, login_timeout: float, upload_timeou
     check_stop()
     write_parts(parts, task.output)
     print(f"{task.label}: đã lưu đủ 10 file .txt tại: {task.output.resolve()}", flush=True)
-    print(f"{task.label}: đã kiểm tra đủ ảnh trong chat đã lưu: {page.url}", flush=True)
+    print(f"{task.label}: đã nhận đủ ảnh và phản hồi trong cuộc trò chuyện: {page.url}", flush=True)
     if not keep_images and archive_uploaded(task.images, task.output / "img"):
         raise GeminiBrowserError("Ảnh đã gửi nhưng chưa chuyển được đủ ảnh vào problem/img; xem lý do phía trên.")
     print(f"Đã hoàn tất {task.label}.", flush=True)
