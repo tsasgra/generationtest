@@ -1,14 +1,16 @@
 """Response polling checks, including Chromium fixtures with no Gemini requests."""
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stdout
 import html
 import io
 from pathlib import Path
 import shutil
+import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from gemini_tool import browser, parts
-from polygon_tool.input import PARTS
+from polygon_tool.input import PARTS, parse_problem
 
 
 def response_events(solution='int main() {}'):
@@ -85,6 +87,15 @@ class ResponsePollingTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.wait(page)
 
+    def test_missing_message_and_missing_response_are_not_reported_as_generating(self):
+        for state, message in (({'user': False}, 'tin nhắn chứa prompt'),
+                               ({}, 'vùng câu trả lời'),
+                               ({'busy': True}, 'Stop/streaming')):
+            with self.subTest(state=state):
+                page = PollingPage([{'revision': None, 'events': None, **state}])
+                with self.assertRaisesRegex(ValueError, message):
+                    self.wait(page, timeout=1)
+
 
 class ChromiumResponseTests(unittest.TestCase):
     @classmethod
@@ -122,15 +133,16 @@ class ChromiumResponseTests(unittest.TestCase):
             Element.prototype.scrollIntoView = () => { window.scrollCalls++; };
         }''')
 
-    def snapshot(self, revision=None):
-        return self.page.evaluate(parts.RESPONSE_STATE, {'prompt': parts.DEFAULT_PROMPT, 'revision': revision})
+    def snapshot(self, revision=None, **options):
+        return self.page.evaluate(parts.RESPONSE_STATE, {'prompt': parts.DEFAULT_PROMPT,
+                                                         'revision': revision, **options})
 
     def stop_streaming(self):
         self.page.locator('.stop-button').evaluate("el => el.remove()")
 
     def test_streaming_does_not_extract_code_or_scroll(self):
         for _ in range(5):
-            state = self.snapshot()
+            state = self.snapshot(refresh=True, reveal=True)
             self.assertTrue(state['busy'])
             self.assertIsNone(state['events'])
         self.assertTrue(self.page.evaluate('window.__geminiPartsCache === undefined'))
@@ -155,6 +167,116 @@ class ChromiumResponseTests(unittest.TestCase):
         self.stop_streaming()
         first = self.snapshot()
         self.assertEqual(self.snapshot()['events'], first['events'])
+
+    def test_code_block_component_without_pre_is_extracted(self):
+        self.stop_streaming()
+        self.page.locator('pre').evaluate_all('''elements => elements.forEach(el => {
+            const block = document.createElement('code-block');
+            block.style.display = 'block';
+            block.innerHTML = '<div>cpp <button>Copy code</button></div>';
+            block.append(el.querySelector('code'));
+            el.replaceWith(block);
+        })''')
+        result = parts.parts_from_events(self.snapshot()['events'])
+        self.assertEqual(result['name problem'], 'fixture-task')
+        self.assertEqual(result['solution'], 'int main() {}\n' * 3000)
+
+    def test_part_headings_allow_line_breaks_and_optional_punctuation(self):
+        self.stop_streaming()
+        self.page.locator('h3').evaluate_all('''elements => elements.forEach((el, i) => {
+            el.innerHTML = i % 2 ? `Part ${i + 1}` : `<b>Part ${i + 1}</b>\nsection`;
+        })''')
+        self.assertEqual(parts.parts_from_events(self.snapshot()['events'])['name problem'], 'fixture-task')
+
+    def test_disabled_stop_and_busy_attachment_do_not_hide_completed_response(self):
+        self.page.locator('.stop-button').evaluate("el => el.disabled = true")
+        self.page.locator('model-response').evaluate('''el => {
+            const image = document.createElement('div');
+            image.setAttribute('aria-busy', 'true');
+            image.textContent = 'Loading illustration';
+            el.append(image);
+        }''')
+        state = self.snapshot()
+        self.assertFalse(state['busy'])
+        self.assertEqual(parts.parts_from_events(state['events'])['name problem'], 'fixture-task')
+
+    def test_send_button_with_old_stop_class_does_not_block_export(self):
+        self.page.locator('.stop-button').evaluate("el => el.setAttribute('aria-label', 'Send message')")
+        self.assertFalse(self.snapshot()['busy'])
+        for attribute in ('aria-busy', 'data-is-streaming'):
+            with self.subTest(attribute=attribute):
+                self.page.locator('model-response').evaluate('(el, name) => el.setAttribute(name, "true")', attribute)
+                self.assertTrue(self.snapshot()['busy'])
+                self.page.locator('model-response').evaluate('(el, name) => el.removeAttribute(name)', attribute)
+
+    def test_response_with_display_contents_remains_readable(self):
+        self.stop_streaming()
+        self.page.add_style_tag(content='model-response {display:contents}')
+        self.assertEqual(parts.parts_from_events(self.snapshot()['events'])['name problem'], 'fixture-task')
+
+    def test_latest_prompt_is_selected_without_accepting_old_or_ambiguous_turns(self):
+        self.stop_streaming()
+        self.page.locator('user-query').evaluate('''el => {
+            const earlier = document.createElement('user-query');
+            earlier.textContent = 'Earlier unrelated question';
+            el.before(earlier);
+        }''')
+        self.assertEqual(parts.parts_from_events(self.snapshot()['events'])['name problem'], 'fixture-task')
+        self.page.locator('user-query').first.evaluate('(el, prompt) => el.textContent = prompt', parts.DEFAULT_PROMPT)
+        self.assertFalse(self.snapshot()['user'])
+        self.page.locator('user-query').first.evaluate("el => el.remove()")
+        self.page.locator('model-response').evaluate('''el => {
+            const followup = document.createElement('user-query');
+            followup.textContent = 'Different followup question';
+            el.after(followup);
+        }''')
+        self.assertFalse(self.snapshot()['user'])
+
+    def test_refresh_rechecks_visibility_changed_outside_the_response(self):
+        self.stop_streaming()
+        self.page.add_style_tag(content='body.masked pre {display:none}')
+        self.page.locator('body').evaluate("el => el.classList.add('masked')")
+        first = self.snapshot()
+        self.assertFalse(any('code' in event for event in first['events']))
+        self.page.locator('body').evaluate("el => el.classList.remove('masked')")
+        changed = self.snapshot(first['revision'], refresh=True)
+        self.assertNotEqual(changed['revision'], first['revision'])
+        self.assertEqual(parts.parts_from_events(changed['events'])['name problem'], 'fixture-task')
+
+    def test_wait_materializes_lazy_response_once_after_streaming_stops(self):
+        self.stop_streaming()
+        self.page.locator('pre code').last.evaluate("el => el.textContent = ''")
+        self.page.evaluate('''() => {
+            Element.prototype.scrollIntoView = () => {
+                window.scrollCalls++;
+                setTimeout(() => {
+                    document.querySelector('pre:last-child code').textContent = 'finished after rendering';
+                }, 20);
+            };
+        }''')
+        with patch.object(parts, 'check_stop'), redirect_stdout(io.StringIO()):
+            result = parts.wait_for_parts(self.page, parts.DEFAULT_PROMPT, timeout=8)
+        self.assertEqual(result['solution'], 'finished after rendering')
+        self.assertEqual(self.page.evaluate('window.scrollCalls'), 1)
+
+    def test_completed_task_writes_ten_files_with_reused_send_button(self):
+        self.page.locator('.stop-button').evaluate("el => el.setAttribute('aria-label', 'Send message')")
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            # Start at the submitted-message boundary; extraction, confirmation
+            # and writing all ten UTF-8 files run against the real browser DOM.
+            for name in ('new_chat', 'pause_after_action', 'choose_files', 'wait_for_upload', 'send_prompt'):
+                stack.enter_context(patch.object(browser, name))
+            stack.enter_context(patch.object(parts, 'check_stop'))
+            stack.enter_context(patch.object(browser, 'check_stop'))
+            stack.enter_context(redirect_stdout(io.StringIO()))
+            output = Path(directory) / 'problem1'
+            task = browser.UploadTask([SimpleNamespace(upload=Path('page.png'))], output, 'problem1')
+            browser._process_task(task, self.page, login_timeout=1, upload_timeout=1,
+                                  prompt=parts.DEFAULT_PROMPT, keep_images=True,
+                                  attach_only=False, response_timeout=5)
+            self.assertEqual(len(list(output.glob('*.txt'))), 10)
+            self.assertEqual(parse_problem(output)['solution'], 'int main() {}\n' * 3000)
+            self.assertEqual(self.page.evaluate('window.scrollCalls'), 0)
 
     def test_upload_confirmation_does_not_reload_the_page(self):
         self.stop_streaming()

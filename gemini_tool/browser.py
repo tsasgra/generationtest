@@ -501,7 +501,7 @@ def _process_task(task: UploadTask, page, *, login_timeout: float, upload_timeou
         keep_tabs_open([page])
         return
     send_prompt(page, prompt, paths, upload_timeout)
-    print(f"{task.label}: đã gửi ảnh; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
+    print(f"{task.label}: đã gửi ảnh vào {page.url}; chờ Gemini hoàn tất đủ 10 Part...", flush=True)
     parts = wait_for_parts(page, prompt, response_timeout)
     verify_saved_upload(page, prompt, paths, upload_timeout)
     check_stop()

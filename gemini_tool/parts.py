@@ -129,52 +129,81 @@ def write_parts(parts: dict[str, str], output: Path) -> None:
         shutil.rmtree(temporary)
 
 
-RESPONSE_STATE = r"""({prompt, revision = null}) => {
-    const visible = el => !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+RESPONSE_STATE = r"""({prompt, revision = null, refresh = false, reveal = false}) => {
+    const visible = el => {
+        const style = getComputedStyle(el);
+        if (style.visibility === 'hidden' || style.display === 'none') return false;
+        return !!el.getClientRects().length ||
+            style.display === 'contents' && [...el.children].some(visible);
+    };
     const normalize = text => text.replace(/\s+/g, ' ').trim();
     const users = [...document.querySelectorAll('user-query, .user-query-container, [data-message-author-role="user"]')]
         .filter(visible).filter(el => !el.parentElement?.closest('user-query, .user-query-container, [data-message-author-role="user"]'));
-    const user = users.length === 1 && normalize(users[0].innerText).includes(normalize(prompt)) ? users[0] : null;
+    const matching = users.filter(el => normalize(el.textContent).includes(normalize(prompt)));
+    const user = matching.length === 1 && matching[0] === users[users.length - 1] ? matching[0] : null;
     let roots = [];
-    for (const selector of ['model-response', '.model-response-text']) {
+    for (const selector of ['model-response', '.model-response-text', '[data-message-author-role="assistant"]']) {
         roots = [...document.querySelectorAll(selector)].filter(visible).filter(root =>
             user && (user.compareDocumentPosition(root) & Node.DOCUMENT_POSITION_FOLLOWING));
         if (roots.length) break;
     }
     const root = roots[roots.length - 1];
     const busy = [...document.querySelectorAll('.stop-button, [data-test-id="stop-button"], button[aria-label]')]
-        .filter(visible).some(el => el.matches('.stop-button, [data-test-id="stop-button"]') ||
-            /^(stop (response|generating|generation)|dừng (phản hồi|tạo|trả lời))/i.test(el.getAttribute('aria-label') || '')) ||
+        .filter(visible).filter(el => !el.matches(':disabled, [aria-disabled="true"]')).some(el => {
+            const label = el.getAttribute('aria-label') || '';
+            // Some layouts reuse a button and leave its old stop-button class.
+            if (/^(send|send message|submit|gửi|gửi tin nhắn)(\s|$)/i.test(label)) return false;
+            return el.matches('.stop-button, [data-test-id="stop-button"]') ||
+                /^(stop (response|generating|generation)|dừng (phản hồi|tạo|trả lời))/i.test(label);
+        }) ||
         !!root && (root.matches('[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]') ||
-            [...root.querySelectorAll('[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]')].some(visible));
+            [...root.querySelectorAll('.model-response-text[aria-busy="true"], [data-is-streaming="true"], [data-state="streaming"]')].some(visible));
     const error = [...document.querySelectorAll('[role="alert"]')].filter(visible).map(el => el.innerText)
         .filter(text => /error|failed|unable|limit|lỗi|không thể|giới hạn/i.test(text)).join('\n');
-    const state = {url: location.href, user: !!user, busy, events: null, revision: null, error};
+    const state = {url: location.href, user: !!user, response: !!root, busy, events: null, revision: null, error};
     // While Gemini streams, only inspect readiness. Walking every code block
     // and sending its text over CDP on every poll slows down large responses.
     if (busy || !user || !root || error) return state;
     let cache = window.__geminiPartsCache;
     if (!cache || cache.root !== root || cache.prompt !== prompt) {
         cache?.observer.disconnect();
-        cache = {root, prompt, id: crypto.randomUUID(), version: 0, dirty: true, events: []};
+        cache = {root, prompt, id: crypto.randomUUID(), version: 0, dirty: true, events: [], revealed: false};
         cache.observer = new MutationObserver(() => { cache.version++; cache.dirty = true; });
         cache.observer.observe(root, {subtree: true, childList: true, characterData: true,
             attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden']});
         window.__geminiPartsCache = cache;
     }
+    if (refresh) {
+        // Layout/CSS changes outside root need not trigger its observer.
+        cache.version++;
+        cache.dirty = true;
+    }
+    if (reveal && !cache.revealed) {
+        // Recover lazy rendering once, only after generation stopped and the
+        // initial read was incomplete. Never scroll on every streaming poll.
+        (root.lastElementChild || root).scrollIntoView({block: 'end', behavior: 'instant'});
+        cache.revealed = true;
+    }
     const events = [];
+    const codeSelector = 'pre, code-block, .code-block, [data-test-id="code-block"]';
     function walk(el) {
         if (!visible(el)) return;
-        if (el.tagName === 'PRE') {
-            events.push({code: (el.querySelector('code') || el).textContent});
+        if (el.matches(codeSelector)) {
+            // Gemini also renders <code-block><code> without a <pre>.
+            // Read code only, excluding the language/copy-button toolbar.
+            let blocks = el.tagName === 'PRE' ? [el] : [...el.querySelectorAll('pre')];
+            if (!blocks.length) blocks = [...el.querySelectorAll('code')];
+            for (const block of blocks.filter(visible)) {
+                events.push({code: (block.querySelector('code') || block).textContent});
+            }
             return;
         }
         // Containers with code cannot be headings. Avoid concatenating all
         // their descendant code just to test a short heading expression.
-        if (!el.querySelector('pre')) {
-            const text = el.textContent.trim();
-            const heading = /^Part\s+(\d+)\s*[:.()\-–—]\s*[^\r\n]+$/i.exec(text);
-            if (heading && text.length < 200) {
+        if (!el.querySelector(codeSelector)) {
+            const text = normalize(el.textContent);
+            const heading = /^(?:Part|Phần)\s+(\d+)(?:\s*[:.()\-–—]\s*.*|\s+.*)?$/i.exec(text);
+            if (heading && text.length < 200 && [...text.matchAll(/(?:Part|Phần)\s+\d+/gi)].length === 1) {
                 events.push({part: Number(heading[1])});
                 return;
             }
@@ -211,18 +240,27 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
     revision = None
     result = None
     stable_since = None
+    idle_since = None
+    next_refresh = 0
     last_status = None
+    last_log = time.monotonic()
     last_error = "Chưa có câu trả lời đủ 10 Part."
     while time.monotonic() < deadline:
         check_stop()
         if page.is_closed():
             raise ValueError("Tab Gemini đã đóng trước khi lưu đủ 10 Part vào problem.")
         try:
-            snapshot = page.evaluate(RESPONSE_STATE, {"prompt": prompt, "revision": revision})
+            refresh = (result is None and idle_since is not None and
+                       time.monotonic() >= max(idle_since + 2, next_refresh))
+            snapshot = page.evaluate(RESPONSE_STATE, {"prompt": prompt, "revision": revision,
+                                                       "refresh": refresh, "reveal": refresh})
+            if refresh:
+                next_refresh = time.monotonic() + 2
         except PlaywrightError:
             if page.is_closed() or (page.context.browser is not None and not page.context.browser.is_connected()):
                 raise ValueError("Mất kết nối Gemini trước khi lưu đủ 10 Part.")
             stable_since = None
+            idle_since = None
             revision = None
             page.wait_for_timeout(200)
             continue
@@ -232,9 +270,18 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
             raise ValueError(f"Gemini báo lỗi khi tạo 10 Part: {snapshot['error']}")
         if snapshot["busy"] or not snapshot["user"] or snapshot["revision"] is None:
             stable_since = None
+            idle_since = None
             previous = result = revision = None
-            status = "Gemini đang trả lời; tiếp tục chờ đủ 10 Part..."
+            if not snapshot["user"]:
+                last_error = "Chưa nhận diện được tin nhắn chứa prompt đã gửi trong chat hiện tại."
+            elif snapshot["busy"]:
+                last_error = "Giao diện Gemini vẫn báo đang tạo câu trả lời (Stop/streaming)."
+            else:
+                last_error = "Chưa nhận diện được vùng câu trả lời Gemini trong chat hiện tại."
+            status = last_error
         else:
+            if idle_since is None:
+                idle_since = time.monotonic()
             events = snapshot["events"]
             if events is not None:
                 revision = snapshot["revision"]
@@ -254,11 +301,12 @@ def wait_for_parts(page, prompt: str, timeout: float) -> dict[str, str]:
                 if time.monotonic() - stable_since >= 2:
                     return result
                 status = "Đã thấy 10 Part; đang chờ nội dung ổn định..."
-        if status != last_status:
+        if status != last_status or time.monotonic() - last_log >= 15:
             print(status, flush=True)
             last_status = status
+            last_log = time.monotonic()
         page.wait_for_timeout(200)
     raise ValueError(
         f"Hết {timeout:g} giây chờ 10 Part: {last_error} "
-        "Giữ ảnh gốc và bộ problem cũ; kiểm tra lịch sử Gemini trước khi gửi lại."
+        f"Chat: {page.url}. Giữ ảnh gốc và bộ problem cũ; kiểm tra lịch sử Gemini trước khi gửi lại."
     )

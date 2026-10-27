@@ -152,6 +152,12 @@ Trong lúc đang sinh, script chỉ kiểm tra trạng thái và lỗi, không q
 khối code hoặc cuộn liên tục. Khi Gemini ngừng sinh, nội dung được đọc một lần;
 các lần kiểm tra tiếp theo dùng lại dữ liệu nếu nội dung chưa thay đổi. Nếu Part 10
 hoặc phần khác còn cập nhật, script đọc lại và chờ ổn định từ đầu.
+Nếu lần đọc đầu chưa đủ, script đọc lại DOM mỗi hai giây và cuộn đến cuối phản hồi
+một lần để kích hoạt nội dung render muộn; chỉ thực hiện sau khi Gemini ngừng sinh.
+Nút đã chuyển về Send dù còn class Stop, nút Stop bị vô hiệu hóa và ảnh con đang
+tải không bị coi là câu trả lời còn đang sinh. Cờ streaming của phản hồi vẫn được
+tôn trọng. Script đọc cả khối `pre` và `code-block`, nhận tiêu đề `Part 1`,
+`Part 1: ...` hoặc tiêu đề xuống dòng, và giữ nguyên nội dung code.
 Chỉ khi Gemini ngừng sinh, đủ Part 1–10 và nội dung ổn định ít nhất **hai giây**,
 script xác nhận ảnh trong chat hiện tại rồi ghi trọn bộ 10 file. Thời gian sinh
 câu trả lời trên máy chủ Gemini vẫn phụ thuộc dịch vụ và nội dung bài.
@@ -219,6 +225,12 @@ Riêng bài hết thời gian được báo lỗi và giữ ảnh gốc cùng b�
 Các bài sau chưa được bắt đầu; script dọn dữ liệu tạm và giữ kết quả đã hoàn thành.
 Chế độ Gemini riêng giữ các bộ `problem` hoàn thành qua Start/Stop. Luồng chung Start tạo lượt mới như README mô tả.
 
+Nếu Gemini đã trả xong nhưng chưa thấy file, terminal phân biệt ba tình huống:
+chưa nhận diện được tin nhắn chứa prompt, chưa nhận diện được vùng câu trả lời,
+hoặc giao diện vẫn báo Stop/streaming. Khi đọc được nội dung, log chỉ rõ Part còn
+thiếu hoặc khối code chưa hợp lệ. Trạng thái được nhắc lại mỗi 15 giây; URL chat
+được in sau khi gửi và khi hết thời gian để đối chiếu đúng cuộc trò chuyện.
+
 Mỗi lần chỉ xử lý một bài. `--workers` được giữ để tương thích lệnh cũ và chỉ nhận `1`:
 
 ```powershell
@@ -283,7 +295,9 @@ chế độ chỉ đính kèm và việc giữ/xóa đúng ảnh gốc. File ki�
 
 Các kiểm thử phản hồi hiện tại nằm trong `tests/test_gemini_response.py`, gồm phần
 đang sinh, code thay đổi muộn, thiếu/trùng Part, đổi chat, bộ nhớ đệm nội dung và
-xác nhận không reload. Các ca Chromium dùng trang mô phỏng chặn mọi request ra ngoài;
+xác nhận không reload. Có kiểm thử nút Send còn class Stop, ảnh con đang tải,
+khối code không có `pre`, tiêu đề xuống dòng, render muộn và xuất đủ 10 file.
+Các ca Chromium dùng trang mô phỏng chặn mọi request ra ngoài;
 chúng chạy khi máy có Chromium/Chrome hoặc Chromium của Playwright.
 
 Kiểm thử Stop mô phỏng việc dừng đúng cây tiến trình/profile, PID bị tái sử dụng,
