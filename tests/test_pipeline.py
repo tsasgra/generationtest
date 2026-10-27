@@ -124,7 +124,53 @@ class PipelineTests(unittest.TestCase):
         report = (self.root / 'report.txt').read_text()
         self.assertIn('2/2', report)
         self.assertLess(report.index('02. task-2'), report.index('10. task-10'))
+        self.assertNotIn('Cảnh báo ảnh', report)
         self.assertFalse(list((self.root / '.gemini-runtime').glob('upload-*')))
+
+    def test_report_flags_statement_image_fields_after_gemini_and_on_resume(self):
+        self.images(1, 2)
+
+        def with_references(tasks, **options):
+            self.gemini(tasks, **options)
+            folder = tasks[0].output
+            if tasks[0].label == 'problem1':
+                values = {'name': 'Hình title.JPG', 'lengend': 'images/figure.png',
+                          'input': 'https://example.test/input.jpeg?size=100',
+                          'output': 'answer.svg', 'note': 'animation.webp'}
+                for field, value in values.items():
+                    (folder / f'{field}.txt').write_text(value, encoding='utf-8')
+            else:
+                (folder / 'solution.txt').write_text('// source-only.png', encoding='utf-8')
+
+        self.remote.side_effect = with_references
+        self.failures.add(1)
+        with self.assertRaises(batch.BatchError):
+            self.run_pipeline()
+        warning = ('problem1, task-1, có đường dẫn/tham chiếu ảnh trong: '
+                   'name, legend, input, output, note')
+        report = (self.root / 'report.txt').read_text(encoding='utf-8')
+        self.assertIn(warning, report)
+        self.assertIn('01. task-1: LỖI', report)
+        self.assertIn('02. problem2: CHƯA HOÀN TẤT', report)
+
+        self.failures.clear()
+        self.assertEqual(self.run_pipeline('resume'), 0)
+        report = (self.root / 'report.txt').read_text(encoding='utf-8')
+        self.assertIn('2/2', report)
+        self.assertEqual(report.count(warning), 1)
+        self.assertNotIn('problem2, task-2, có đường dẫn', report)
+        self.assertEqual(self.remote.call_count, 2)
+        self.assertEqual(self.events, [('export', 1), ('create', 1), ('complete', 1),
+                                       ('export', 2), ('create', 2), ('complete', 2)])
+
+    def test_polygon_report_accepts_legend_filename_alias(self):
+        folder = self.problem(7)
+        (folder / 'lengend.txt').rename(folder / 'legend.txt')
+        (folder / 'legend.txt').write_text('Xem hình figure.PNG.', encoding='utf-8')
+        self.upload([7])
+        report = (self.root / 'report.txt').read_text(encoding='utf-8')
+        self.assertIn('1/1', report)
+        self.assertIn('problem7, task-7, có đường dẫn/tham chiếu ảnh trong: legend', report)
 
     def test_all_ten_problems(self):
         self.images(*range(1, 11))

@@ -16,7 +16,7 @@ import time
 from gemini_tool.control import StopRequested, check_stop, exclusive_lock, sleep
 from polygon_tool.api import PolygonAPI
 from polygon_tool.credentials import load_credentials
-from polygon_tool.image_refs import has_image_reference
+from polygon_tool.image_refs import image_reference_fields
 from polygon_tool.input import MAX_PROBLEMS, discover_problems, parse_batch
 from polygon_tool.problem_url import resolve_problem_url, validate_problem_url
 from polygon_tool.workflow import Workflow, WorkflowError, atomic_json, digest, state_lock
@@ -171,10 +171,14 @@ def _write_report(path: Path, entries: list[dict], outcomes: list[dict]) -> None
             # One logical row per problem, even if a remote diagnostic is multiline.
             message = ' '.join(message.splitlines())
             lines.append(f"{prefix}: {labels[outcome['status']]}" + (f' — {message}' if message else ''))
-    image_warnings = [f"problem{entry['number']}, {entry['name']}, thiếu ảnh" for entry in entries
-                      if has_image_reference(entry.get('parts', {}))]
+    image_warnings = []
+    for entry in entries:
+        fields = image_reference_fields(entry.get('parts', {}))
+        if fields:
+            image_warnings.append(
+                f"problem{entry['number']}, {entry['name']}, có đường dẫn/tham chiếu ảnh trong: {', '.join(fields)}")
     if image_warnings:
-        lines.extend(['', 'Cần bổ sung ảnh thủ công trên Polygon:', *image_warnings])
+        lines.extend(['', 'Cảnh báo ảnh trong nội dung đề:', *image_warnings])
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + '.tmp')
     with temp.open('w', encoding='utf-8', newline='\n') as stream:

@@ -130,9 +130,13 @@ Chuyển ảnh xong mới sang bài tiếp theo. Nếu chuyển ảnh lỗi, lu�
 checkpoint Polygon; lệnh Python `resume` thử chuyển tiếp mà không tạo/upload lại bài.
 Ảnh mới thêm hoặc ảnh đã thay đổi sau khi gửi không bị chuyển theo lượt cũ.
 Chế độ chạy riêng Gemini vẫn lưu ảnh sau khi nhận đủ nội dung vì không có bước Polygon.
-Nếu đề tham chiếu ảnh, `report.txt` ghi
-`problemN, nameproblem, thiếu ảnh`; bổ sung các ảnh đó vào **Statement Resource Files**
-của Polygon với tên khớp statement.
+Nếu `name`, `legend` (hoặc `lengend`), `input`, `output`, `note` chứa đường dẫn
+ảnh (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, …, không phân biệt hoa/thường)
+hoặc tham chiếu ảnh LaTeX/HTML/Markdown, `report.txt` ghi cảnh báo kèm tên trường:
+`problemN, nameproblem, có đường dẫn/tham chiếu ảnh trong: legend, note`.
+Cảnh báo chỉ dựa trên nội dung local, không gọi Polygon để kiểm tra lại, không chặn
+upload và được giữ khi resume. Bổ sung ảnh cần thiết vào **Statement Resource Files**
+của Polygon với tên khớp statement; cảnh báo không khẳng định ảnh đang thiếu trên server.
 
 **Start luôn là lượt chạy mới**. Trên Windows, script tự dừng tiến trình và trình duyệt
 của lượt cũ, kể cả menu của bản cũ hoặc lượt bị gián đoạn khi cài thư viện.

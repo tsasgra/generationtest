@@ -142,6 +142,14 @@ my_problem/
 
 Tên file `name problem.txt` có một dấu cách giữa `name` và `problem`. `lengend.txt` giữ cách viết trong yêu cầu; có thể dùng `legend.txt` thay thế, nhưng không dùng cả hai. Thư mục phải có đủ 10 file tương ứng, không có file `.txt` lạ. Thiếu file, trùng phần qua alias hoặc file bắt buộc rỗng đều bị từ chối trước khi gọi API. `note.txt` rỗng hoặc chỉ chứa khoảng trắng được gửi thành chuỗi rỗng; chín file còn lại phải có nội dung.
 
+Luồng `pipeline.py run`/`polygon` ghi cảnh báo vào `report.txt` nếu các trường `name`,
+`legend`/`lengend`, `input`, `output`, `note` chứa đường dẫn ảnh (`.png`, `.jpg`,
+`.jpeg`, `.gif`, `.webp`, `.svg`, …) hoặc tham chiếu ảnh LaTeX/HTML/Markdown.
+Báo cáo nêu số bài, tên định danh và các trường có ảnh, ví dụ:
+`problem1, task-1, có đường dẫn/tham chiếu ảnh trong: legend, output`.
+Đây là nhắc nhở từ nội dung local, không kiểm tra tài nguyên trên Polygon và không
+chặn upload. Cảnh báo vẫn xuất hiện khi bài lỗi hoặc tiếp tục bằng `resume`.
+
 `name problem.txt` và `name.txt` độc lập. Tên hiển thị được dùng tiếng Việt nhưng phải nằm trên một dòng. Tên định danh được kiểm tra sơ bộ bằng `[a-z0-9-]+` (chữ thường, chữ số và dấu gạch ngang), không tự chuyển đổi; Polygon tiếp tục kiểm tra tên khi tạo bài. Tài liệu API công khai chưa liệt kê đầy đủ mọi giới hạn tên phía server.
 
 Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với hai file tên, một dấu xuống dòng cuối file được bỏ để hỗ trợ cách lưu thông thường của trình soạn thảo. Nội dung các file còn lại giữ nguyên tiếng Việt, LaTeX, backslash, `$`, `~`, thụt dòng, dấu cách và xuống dòng, kể cả các dòng trắng đầu/cuối. Request gửi nội dung đã đọc. Nội dung đã gửi không được tải lại để đối chiếu.
