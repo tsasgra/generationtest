@@ -242,6 +242,45 @@ def run_pipeline(argv: list[str] | None = None) -> int:
         return 1
 
 
+def _ensure_pip(python: Path) -> None:
+    """Repair pip in the target environment without rebuilding its packages."""
+    def available():
+        return subprocess.run([str(python), "-m", "pip", "--version"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+    if available():
+        return
+    print(".venv-gemini thiếu pip hoặc pip bị lỗi; đang tự khôi phục...", flush=True)
+    try:
+        # ensurepip uses wheels shipped with Python; it needs no network.
+        subprocess.run([str(python), "-m", "ensurepip", "--upgrade"], check=False)
+        if available():
+            return
+        # An interrupted installation can leave pip's metadata but no working
+        # module. ensurepip may then report 'already satisfied'. Run its bundled
+        # wheel directly and ignore that stale metadata when repairing pip.
+        print("Đang sửa bản cài pip dang dở bằng gói đi kèm Python...", flush=True)
+        repair = """\
+import ensurepip, runpy, sys
+from pathlib import Path
+wheels = sorted((Path(ensurepip.__file__).parent / '_bundled').glob('pip-*.whl'))
+if not wheels:
+    raise RuntimeError('Python không có gói pip đi kèm để khôi phục.')
+wheel = str(wheels[-1])
+sys.path.insert(0, wheel)
+sys.argv = ['pip', 'install', '--no-index', '--no-deps', '--ignore-installed', wheel]
+runpy.run_module('pip', run_name='__main__', alter_sys=True)
+"""
+        subprocess.run([str(python), "-c", repair], check=True)
+        if not available():
+            raise RuntimeError("pip vẫn chưa sử dụng được")
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            "Không khôi phục được pip trong .venv-gemini. "
+            "Hãy Repair/cài lại Python 3.10+ bản đầy đủ từ python.org (có pip), rồi mở lại start.bat."
+        ) from exc
+
+
 def _python_with_dependencies() -> Path:
     python = ROOT / ".venv-gemini" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     with exclusive_lock(ROOT / ".pipeline-setup.lock"):
@@ -251,6 +290,7 @@ def _python_with_dependencies() -> Path:
             "import playwright.sync_api, websocket, PIL, pillow_heif, resvg_py, rawpy"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if check.returncode:
+            _ensure_pip(python)
             print("Đang cài thư viện còn thiếu vào .venv-gemini...", flush=True)
             subprocess.run([str(python), "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")], check=True)
     return python

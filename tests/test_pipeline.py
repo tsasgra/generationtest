@@ -2,10 +2,14 @@
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+import venv
 from unittest.mock import patch
 
 from PIL import Image
@@ -703,6 +707,92 @@ class PipelineTests(unittest.TestCase):
         original.write_bytes(b'changed since upload')
         self.assertTrue(delete_uploaded(prepared))
         self.assertTrue(original.exists())
+
+
+class BootstrapTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='pipeline bootstrap with spaces ')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.environment = self.root / '.venv-gemini'
+        self.python = self.environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+
+    def fake_interpreter(self):
+        self.python.parent.mkdir(parents=True)
+        self.python.touch()
+
+    def test_repairs_real_environment_without_pip_and_with_stale_metadata(self):
+        venv.EnvBuilder(with_pip=False).create(self.environment)
+        version = [str(self.python), '-m', 'pip', '--version']
+        self.assertNotEqual(subprocess.run(version, capture_output=True).returncode, 0)
+        site = Path(subprocess.check_output(
+            [str(self.python), '-c', 'import sysconfig; print(sysconfig.get_path("purelib"))'],
+            text=True).strip())
+        marker = site / 'existing_dependency.py'
+        marker.write_text('value = 123\n')
+
+        pipeline._ensure_pip(self.python)
+        self.assertEqual(subprocess.run(version, capture_output=True).returncode, 0)
+        self.assertEqual(marker.read_text(), 'value = 123\n')
+
+        # Reproduce an interrupted install: dist-info survives, pip does not.
+        self.assertTrue(list(site.glob('pip-*.dist-info')))
+        shutil.rmtree(site / 'pip')
+        self.assertNotEqual(subprocess.run(version, capture_output=True).returncode, 0)
+        pipeline._ensure_pip(self.python)
+        self.assertEqual(subprocess.run(version, capture_output=True).returncode, 0)
+        self.assertEqual(marker.read_text(), 'value = 123\n')
+
+    def test_dependency_install_waits_for_pip_in_the_same_environment(self):
+        self.fake_interpreter()
+        pip_ready = False
+        installed = []
+
+        def run(command, **options):
+            nonlocal pip_ready
+            self.assertEqual(command[0], str(self.python))
+            if command[1:3] == ['-m', 'ensurepip']:
+                pip_ready = True
+                return subprocess.CompletedProcess(command, 0)
+            if command[1:3] == ['-m', 'pip']:
+                if command[3] == '--version':
+                    return subprocess.CompletedProcess(command, 0 if pip_ready else 1)
+                self.assertTrue(pip_ready, 'Must repair pip before installing requirements')
+                installed.append(command)
+                return subprocess.CompletedProcess(command, 0)
+            self.assertEqual(command[1], '-c')  # Missing dependencies.
+            return subprocess.CompletedProcess(command, 1)
+
+        with patch.object(pipeline, 'ROOT', self.root), patch.object(pipeline.subprocess, 'run', side_effect=run):
+            self.assertEqual(pipeline._python_with_dependencies(), self.python)
+        self.assertEqual(installed, [[str(self.python), '-m', 'pip', 'install', '-r',
+                                      str(self.root / 'requirements.txt')]])
+
+    def test_unrepairable_pip_stops_before_installing_requirements(self):
+        self.fake_interpreter()
+        installed = []
+
+        def run(command, **options):
+            if command[1:4] == ['-m', 'pip', 'install']:
+                installed.append(command)
+            if options.get('check'):
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 1)
+
+        with patch.object(pipeline, 'ROOT', self.root), patch.object(pipeline.subprocess, 'run', side_effect=run):
+            with self.assertRaisesRegex(RuntimeError, 'Repair/cài lại Python'):
+                pipeline._python_with_dependencies()
+        self.assertEqual(installed, [])
+
+    def test_healthy_environment_skips_repair_and_install(self):
+        self.fake_interpreter()
+        with patch.object(pipeline, 'ROOT', self.root), \
+                patch.object(pipeline.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run, \
+                patch.object(pipeline, '_ensure_pip') as repair:
+            self.assertEqual(pipeline._python_with_dependencies(), self.python)
+        repair.assert_not_called()
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][:2], [str(self.python), '-c'])
 
 
 if __name__ == '__main__':

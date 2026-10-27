@@ -36,6 +36,9 @@ Nếu một bài lỗi, luồng dừng tại bài đó; các bài phía sau chư
    những lần sau dùng lại phiên đăng nhập.
 6. Khi hoàn tất, mở **`report.txt`** để lấy link Polygon theo thứ tự bài.
 
+Nếu `.venv-gemini` bị thiếu hoặc hỏng `pip` sau lần cài đặt bị ngắt, Start tự khôi phục
+`pip` bằng gói đi kèm Python rồi tiếp tục cài thư viện. Không cần xóa môi trường Python.
+
 Biến môi trường cũng được hỗ trợ thay cho `.env`. File `.env` được đọc như văn bản,
 không thực thi lệnh. Khóa API, ảnh, profile trình duyệt và checkpoint/kết quả phụ được
 bỏ qua bởi Git. Riêng 100 file `.txt` mẫu trong `problem/` được theo dõi để giữ đầy đủ
