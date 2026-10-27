@@ -14,7 +14,7 @@ from .control import check_stop
 from .state import ordinary_directory
 
 
-DEFAULT_PROMPT = "apply polygon-setter skill"
+DEFAULT_PROMPT = "apply polygon setter skill"
 
 
 def output_destinations(output: Path, count: int) -> list[Path]:

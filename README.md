@@ -16,7 +16,7 @@ Các bài chạy **lần lượt theo số thứ tự**. Bài N phải nhận đ
 và có package READY cùng link hợp lệ rồi mới gửi ảnh bài kế tiếp lên Gemini.
 Nếu một bài lỗi, luồng dừng tại bài đó; các bài phía sau chưa được gửi.
 
-Prompt mặc định gửi kèm ảnh chỉ gồm một dòng: `apply polygon-setter skill`.
+Prompt mặc định gửi kèm ảnh chỉ gồm một dòng: `apply polygon setter skill`.
 
 ## Cách dùng
 
