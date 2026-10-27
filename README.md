@@ -18,6 +18,10 @@ Nếu một bài lỗi, luồng dừng tại bài đó; các bài phía sau chư
 
 Prompt mặc định gửi kèm ảnh chỉ gồm một dòng: `apply polygon setter skill`.
 
+Khi tải lên Polygon, script ghi nhận từng bước theo phản hồi thành công của API,
+không tải lại nội dung để đối chiếu. Script vẫn lấy danh sách test để đánh dấu sample,
+commit và chờ package READY trước khi chuyển ảnh và chạy bài tiếp theo.
+
 ## Cách dùng
 
 1. Clone hoặc tải toàn bộ nhánh `main`. Cài Python 3.10+ và Chrome hoặc Edge trên Windows.

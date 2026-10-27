@@ -1,17 +1,15 @@
-"""Resumable Polygon workflow with acknowledged source and script uploads."""
+"""Resumable Polygon uploads using API acknowledgements, without content read-back."""
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import re
 import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable
 
-from .api import APIError, TransportError
 from .samples import detect_sample_indices
 
 
@@ -80,38 +78,60 @@ class Workflow:
 
     def upload_requests(self):
         source_type = self.options.get('source_type', 'cpp.g++17')
+        p = self.parts
         return {
+            'info': ('problem.updateInfo', {k: self.options[k]
+                     for k in ('timeLimit', 'memoryLimit', 'inputFile', 'outputFile')
+                     if self.options.get(k) is not None}),
+            'statement': ('problem.saveStatement', {'lang': 'vietnamese', 'encoding': 'UTF-8',
+                          'name': p['name'], 'legend': p['lengend'], 'input': p['input'],
+                          'output': p['output'], 'notes': p['note']}),
             'checker.cpp': ('problem.saveFile', {'type': 'source', 'name': 'checker.cpp',
                             'file': self.parts['checker'], 'sourceType': source_type}),
+            'checker': ('problem.setChecker', {'checker': 'checker.cpp'}),
             'gen.cpp': ('problem.saveFile', {'type': 'source', 'name': 'gen.cpp',
                         'file': self.parts['gen'], 'sourceType': source_type}),
             'solution': ('problem.saveSolution', {'name': 'solution.cpp', 'file': self.parts['solution'],
                          'sourceType': source_type, 'tag': 'MA'}),
             'script': ('problem.saveScript', {'testset': 'tests', 'source': self.parts['script_sinh_test']}),
+            'access': ('problem.setAccess', {'login': 'codeforces', 'accessType': 'READ'}),
         }
 
     def migrate_upload_receipts(self):
-        """Use old completed snapshots once, then stop tracking managed content."""
-        if not self.state:
+        """Convert local snapshots from older versions without querying Polygon."""
+        if not self.state or 'snapshot' not in self.state:
             return
-        snapshot = self.state.get('snapshot', {})
-        if 'upload_receipts' not in self.state:
-            receipts = {}
-            if digest(self.parts) == self.state.get('input_digest'):
-                completed = {
-                    'checker.cpp': 'source:checker.cpp' in snapshot.get('files', {}),
-                    'gen.cpp': 'source:gen.cpp' in snapshot.get('files', {}),
-                    'solution': 'solution.cpp' in snapshot.get('solutions', {}),
-                    'script': bool(snapshot.get('script')),
-                }
-                for label, done in completed.items():
-                    if done and self.state.get('pending') != label:
-                        receipts[label] = digest(self.upload_requests()[label])
-            self.state['upload_receipts'] = receipts
-        snapshot.pop('script', None)
-        for name in ('source:checker.cpp', 'source:gen.cpp'):
-            snapshot.get('files', {}).pop(name, None)
-        snapshot.get('solutions', {}).pop('solution.cpp', None)
+        snapshot = self.state.pop('snapshot')
+        self.state.setdefault('info', snapshot.get('info', {}))
+        access = next((a['accessType'] for a in snapshot.get('accesses', [])
+                       if a['login'] == 'codeforces'), None)
+        if access:
+            self.state.setdefault('codeforces_access', access)
+        if digest(self.parts) != self.state.get('input_digest'):
+            return
+        requests = self.upload_requests()
+        statement = snapshot.get('statements', {}).get('vietnamese', {})
+        completed = {
+            'info': all(snapshot.get('info', {}).get(k) == v for k, v in requests['info'][1].items()),
+            'statement': all(isinstance(statement.get(k), str) and text_equal(statement[k], v)
+                             for k, v in requests['statement'][1].items() if k not in ('lang', 'encoding')),
+            'checker.cpp': 'source:checker.cpp' in snapshot.get('files', {}),
+            'checker': snapshot.get('checker') == 'checker.cpp',
+            'gen.cpp': 'source:gen.cpp' in snapshot.get('files', {}),
+            'solution': 'solution.cpp' in snapshot.get('solutions', {}),
+            'script': bool(snapshot.get('script')),
+            'access': access in ('READ', 'WRITE', 'OWNER'),
+        }
+        receipts = self.state.setdefault('upload_receipts', {})
+        for label, done in completed.items():
+            if done and self.state.get('pending') != label:
+                receipts.setdefault(label, digest(requests[label]))
+        for test in snapshot.get('tests', []):
+            label = f"sample:{test['index']}"
+            if self.state.get('pending') != label and type(test.get('useInStatements')) is bool:
+                receipts.setdefault(label, digest(('problem.saveTest', {
+                    'testset': 'tests', 'testIndex': test['index'],
+                    'testUseInStatements': test['useInStatements']})))
 
     def save(self):
         atomic_json(self.path, self.state)
@@ -119,12 +139,11 @@ class Workflow:
     def accept_updated_input(self):
         """Explicit correction of the same problem, after checking server ownership."""
         self.step = 'update-input'
-        if not self.state.get('problem_id') or 'snapshot' not in self.state:
-            raise WorkflowError('Phải xác định problem ID và snapshot trước khi đổi input.')
+        if not self.state.get('problem_id'):
+            raise WorkflowError('Phải xác định problem ID trước khi đổi input.')
         if self.state.get('pending'):
             raise WorkflowError('Còn request chưa xác định kết quả; resume xử lý request đó trước khi đổi input.')
         self.check_revision()  # Also checks slug/owner against the actual object.
-        self.verify_snapshot()
         if digest(self.parts) == self.state['input_digest']:
             raise WorkflowError('Input không đổi; dùng --retry-failed-package nếu muốn thử lại package FAILED.')
         self.state.setdefault('history', []).append({
@@ -143,7 +162,6 @@ class Workflow:
         if self.state.get('pending') or not self.state.get('committed') or not self.state.get('package_id'):
             raise WorkflowError('Chỉ thử lại package đã xác định rõ ID và trạng thái FAILED.')
         self.check_revision()
-        self.verify_snapshot()
         rows = [p for p in self.read('problem.packages') if p['id'] == self.state['package_id']]
         if len(rows) != 1 or rows[0]['state'] != 'FAILED' or rows[0]['revision'] != self.state['revision']:
             raise WorkflowError('Package chưa FAILED ở revision đã ghi; không tạo thêm package.')
@@ -155,9 +173,6 @@ class Workflow:
 
     def read(self, method, **params):
         return self.api.call(method, {'problemId': self.state['problem_id'], **params})
-
-    def raw(self, method, **params):
-        return self.api.call(method, {'problemId': self.state['problem_id'], **params}, raw=True)
 
     def write(self, method, **params):
         return self.api.call(method, {'problemId': self.state['problem_id'], **params}, mutation=True)
@@ -171,50 +186,6 @@ class Workflow:
         if row['name'] != self.parts['name problem'] or row['owner'] != self.state['owner']:
             raise WorkflowError('Xung đột danh tính problem; dừng để tránh sửa nhầm bài.')
         return row
-
-    def file_inventory(self):
-        result = {}
-        groups = self.read('problem.files')
-        for category, key in [('source', 'sourceFiles'), ('resource', 'resourceFiles'), ('aux', 'auxFiles')]:
-            for item in groups.get(key, []):
-                if category == 'source' and item['name'] in ('checker.cpp', 'gen.cpp'):
-                    continue
-                # Only files outside the four managed uploads remain protected
-                # by remote snapshots. Never read managed source contents back.
-                meta = dict(item)
-                if category == 'source':
-                    meta['sha256'] = digest(self.raw('problem.viewFile', type=category, name=item['name']))
-                result[f'{category}:{item["name"]}'] = meta
-        return result
-
-    def solution_inventory(self):
-        return {s['name']: {**s, 'sha256': digest(self.raw('problem.viewSolution', name=s['name']))}
-                for s in self.read('problem.solutions') if s['name'] != 'solution.cpp'}
-
-    def snapshot(self):
-        info = self.read('problem.info')
-        other_settings = {}
-        for method in ('problem.interactor', 'problem.extraValidators', 'problem.viewTags',
-                       'problem.viewGeneralDescription', 'problem.viewGeneralTutorial',
-                       'problem.checkerTests', 'problem.validatorTests', 'problem.materials'):
-            # Polygon rejects interactor queries for ordinary (non-interactive) problems.
-            value = '' if method == 'problem.interactor' and not info['interactive'] else self.read(method)
-            if method in ('problem.checkerTests', 'problem.validatorTests'):
-                # Verification updates run results without changing the working copy.
-                value = [{k: v for k, v in row.items() if k not in ('runVerdict', 'runComment')}
-                         for row in value]
-            other_settings[method] = value
-        return {
-            'info': info,
-            'statements': self.read('problem.statements'),
-            'files': self.file_inventory(),
-            'solutions': self.solution_inventory(),
-            'tests': self.read('problem.tests', testset='tests', noInputs=True),
-            'checker': self.read('problem.checker'),
-            'validator': self.read('problem.validator'),
-            'accesses': self.read('problem.accesses'),
-            'other_settings': other_settings,
-        }
 
     def check_revision(self):
         meta = self.metadata()
@@ -262,209 +233,77 @@ class Workflow:
                           revision=problem['revision'], pending=None)
         self.save()  # ID persisted before ANY further read or write.
 
-    def initialize_snapshot(self):
-        if 'snapshot' not in self.state:
-            self.step = 'snapshot'
+    def initialize_info(self):
+        if 'info' not in self.state:
             self.check_revision()
-            self.state['snapshot'] = self.snapshot()
+            # Read defaults once, before uploading. Later reports use these
+            # values plus settings acknowledged by problem.updateInfo.
+            self.state['info'] = self.read('problem.info')
             self.save()
 
-    @staticmethod
-    def verify_scope(method, params, previous, current):
-        """A completed request cannot authorize unrelated concurrent changes."""
-        before, after = json.loads(json.dumps(previous)), json.loads(json.dumps(current))
-        if method == 'problem.updateInfo':
-            for key in params:
-                before['info'].pop(key, None)
-                after['info'].pop(key, None)
-        elif method == 'problem.saveStatement':
-            lang = params['lang']
-            old = before['statements'].pop(lang, None)
-            new = after['statements'].pop(lang, None)
-            if old is not None:
-                old, new = dict(old), dict(new or {})
-                for key in params:
-                    if key != 'lang':
-                        old.pop(key, None)
-                        new.pop(key, None)
-                if old != new:
-                    raise WorkflowError('Xung đột trường statement ngoài nội dung đang lưu.')
-        elif method == 'problem.saveTest':
-            for row in before['tests']:
-                if row['index'] == params['testIndex']:
-                    row['useInStatements'] = params['testUseInStatements']
-        elif method == 'problem.setAccess':
-            before['accesses'] = [a for a in before['accesses'] if a['login'] != params['login']]
-            after['accesses'] = [a for a in after['accesses'] if a['login'] != params['login']]
-        elif method == 'problem.setChecker':
-            before.pop('checker')
-            after.pop('checker')
-        if before != after:
-            raise WorkflowError(f'Xung đột thay đổi ngoài phạm vi request {method}.')
-
-    def action(self, label, method, params, sections, readers, satisfied, *, mismatch_details=None):
-        """Compare-before-write and verify-after-write. Pending writes are reconciled."""
-        def mismatch_error(message):
-            details = mismatch_details() if mismatch_details else []
-            return WorkflowError(message + (' ' + ' '.join(details) if details else ''))
-
+    def action(self, label, method, params):
+        """Record successful writes; resume replays only unacknowledged setters."""
         self.step = label
-        self.check_revision()
-        pending = self.state.get('pending')
-        if pending and pending != label:
-            # Earlier completed actions remain readable while a later action is pending.
-            if not satisfied():
-                raise mismatch_error(f'Xung đột bước {label}; đang chờ xử lý {pending}.')
-            return
-        current = {key: reader() for key, reader in zip(sections, readers)}
-        previous = {key: self.state['snapshot'][key] for key in sections}
-        if pending == label:
-            if satisfied():
-                self.verify_scope(method, params, previous, current)
-                self.state['snapshot'].update(current)
-                self.state['pending'] = None
-                self.save()
-                return
-            if current != previous:
-                raise mismatch_error(f'Bước {label} chưa hoàn tất và dữ liệu đã khác checkpoint; cần kiểm tra trên Polygon.')
-        elif current != previous:
-            # The user may have completed "Set checker" in the web UI while
-            # stopped. Adopt only the requested selection; other changes still
-            # go through the normal scope and final snapshot checks.
-            if method == 'problem.setChecker' and satisfied():
-                self.verify_scope(method, params, previous, current)
-                self.state['snapshot'].update(current)
-                self.save()
-                return
-            raise WorkflowError(f'Xung đột thay đổi bên ngoài tại {label}; không ghi đè.')
-        if satisfied():
-            return
-        self.log(f'Đang lưu: {label}')
-        self.state['pending'] = label
-        self.save()
-        try:
-            self.write(method, **params)
-        except APIError:
-            # Keep intent: even a server failure may have partially changed state.
-            raise
-        if not satisfied():
-            raise mismatch_error(f'{label}: đọc lại không khớp dữ liệu đã gửi.')
-        updated = {key: reader() for key, reader in zip(sections, readers)}
-        self.verify_scope(method, params, previous, updated)
-        self.state['snapshot'].update(updated)
-        self.state['pending'] = None
-        self.save()
-
-    def upload_without_readback(self, label):
-        """An API success acknowledges these named uploads; no content read-back."""
-        self.step = label
-        self.check_revision()
-        method, params = self.upload_requests()[label]
         receipt = digest((method, params))
         receipts = self.state.setdefault('upload_receipts', {})
-        if receipts.get(label) == receipt:
-            return
         pending = self.state.get('pending')
+        if receipts.get(label) == receipt and pending != label:
+            return False
         if pending and pending != label:
             raise WorkflowError(f'Chưa hoàn tất {label}; đang chờ xử lý {pending}.')
-        if label in ('checker.cpp', 'gen.cpp', 'solution'):
-            section = 'solutions' if label == 'solution' else 'files'
-            current = self.solution_inventory() if label == 'solution' else self.file_inventory()
-            if current != self.state['snapshot'][section]:
-                raise WorkflowError(f'Xung đột thay đổi ngoài các file đang tải tại {label}.')
+        self.check_revision()
         self.log(f'Đang lưu: {label}')
         self.state['pending'] = label
         self.save()
-        # If an earlier response was lost, replay only this named save operation.
-        # problem.create, commits and package builds retain their own recovery.
+        # API errors leave the intent intact. Named saves can be retried;
+        # create, commit and build keep their separate recovery paths.
         self.write(method, **params)
         if label == 'script':
-            tests = self.read('problem.tests', testset='tests', noInputs=True)
-            manual = lambda rows: [row for row in rows if row.get('manual')]
-            if manual(tests) != manual(self.state['snapshot']['tests']):
-                raise WorkflowError('Xung đột test thủ công ngoài script đang lưu.')
-            self.state['snapshot']['tests'] = tests
+            # Saving a new script can recreate tests and reset Example flags.
+            for key in list(receipts):
+                if key.startswith('sample:'):
+                    receipts.pop(key)
         receipts[label] = receipt
         self.state['pending'] = None
         self.save()
-
-    def activate_checker(self):
-        selected = []
-
-        def checker_ok():
-            selected[:] = [self.read('problem.checker')]
-            return selected[0] == 'checker.cpp'
-
-        self.action('checker', 'problem.setChecker', {'checker': 'checker.cpp'}, ['checker'],
-                    [lambda: self.read('problem.checker')], checker_ok,
-                    mismatch_details=lambda: [
-                        f'Checker cần dùng: checker.cpp; Polygon đang chọn: {selected[0]!r}.'])
-        self.log('Đã xác nhận checker đang dùng trên Polygon: checker.cpp.')
+        return True
 
     def upload(self):
-        p = self.parts
-        info_updates = {k: self.options[k] for k in ('timeLimit', 'memoryLimit', 'inputFile', 'outputFile')
-                        if self.options.get(k) is not None}
-        self.action('info', 'problem.updateInfo', info_updates, ['info'],
-                    [lambda: self.read('problem.info')],
-                    lambda: all(self.read('problem.info').get(k) == v for k, v in info_updates.items()))
-        self.log('Giới hạn/tệp thực tế: ' + json.dumps(self.read('problem.info'), ensure_ascii=False))
-        statement = {'name': p['name'], 'legend': p['lengend'], 'input': p['input'],
-                     'output': p['output'], 'notes': p['note']}
-        def statement_ok():
-            got = self.read('problem.statements').get('vietnamese', {})
-            return all(isinstance(got.get(k), str) and text_equal(got[k], v) for k, v in statement.items())
-        self.action('statement', 'problem.saveStatement', {'lang': 'vietnamese', 'encoding': 'UTF-8', **statement},
-                    ['statements'], [lambda: self.read('problem.statements')], statement_ok)
-        self.upload_without_readback('checker.cpp')
-        # Old checkpoints can have an unresolved generator write before checker
-        # selection. Reconcile that write first, without replacing its intent.
+        requests = self.upload_requests()
+        if requests['info'][1]:
+            self.action('info', *requests['info'])
+            self.state['info'].update(requests['info'][1])
+        self.log('Giới hạn/tệp áp dụng: ' + json.dumps(self.state['info'], ensure_ascii=False))
+        self.action('statement', *requests['statement'])
+        self.action('checker.cpp', *requests['checker.cpp'])
+        # Older checkpoints may have a pending generator upload before the
+        # checker selection was introduced. Finish that pending save first.
         defer_checker = self.state.get('pending') == 'gen.cpp'
         if not defer_checker:
-            self.activate_checker()
-        self.upload_without_readback('gen.cpp')
+            self.action('checker', *requests['checker'])
+        self.action('gen.cpp', *requests['gen.cpp'])
         if defer_checker:
-            self.activate_checker()
-        solutions = self.read('problem.solutions')
-        if any(s.get('tag') == 'MA' and s['name'] != 'solution.cpp' for s in solutions):
-            raise WorkflowError('Có lời giải chính khác; không tự đổi tag hoặc xóa lời giải đó.')
-        self.upload_without_readback('solution')
-        if any(re.search(r'#\s*include\s*[<"]testlib\.h[>"]', p[part]) for part in ('checker', 'gen', 'solution')):
-            resources = self.read('problem.files').get('resourceFiles', [])
-            if not any(f['name'] == 'testlib.h' for f in resources):
-                self.log('testlib.h không có trong resourceFiles; sẽ kiểm tra hỗ trợ thư viện qua build có verify=true.')
-            else:
-                self.log('Đã xác nhận resource testlib.h trên Polygon.')
-        self.upload_without_readback('script')
+            self.action('checker', *requests['checker'])
+        self.action('solution', *requests['solution'])
+        self.action('script', *requests['script'])
         self.step = 'samples'
+        # This list supplies indices after FreeMarker expansion; it is not a
+        # comparison against uploaded content and is read only once per run.
         tests = self.read('problem.tests', testset='tests', noInputs=True)
         samples = detect_sample_indices(tests, self.options.get('sample_indices'))
         for test in tests:
             index, flag = test['index'], test['index'] in samples
-            def flag_ok(index=index, flag=flag):
-                rows = self.read('problem.tests', testset='tests', noInputs=True)
-                return any(t['index'] == index and t['useInStatements'] == flag for t in rows)
-            self.action(f'sample:{index}', 'problem.saveTest', {'testset': 'tests', 'testIndex': index,
-                        'testUseInStatements': flag}, ['tests'],
-                        [lambda: self.read('problem.tests', testset='tests', noInputs=True)], flag_ok)
+            self.action(f'sample:{index}', 'problem.saveTest', {'testset': 'tests',
+                        'testIndex': index, 'testUseInStatements': flag})
         self.state['sample_indices'] = samples
         self.state['test_count'] = len(tests)
         self.save()
-        def access_ok():
-            return any(a['login'] == 'codeforces' and a['accessType'] in ('READ', 'WRITE', 'OWNER')
-                       for a in self.read('problem.accesses'))
-        self.action('access', 'problem.setAccess', {'login': 'codeforces', 'accessType': 'READ'},
-                    ['accesses'], [lambda: self.read('problem.accesses')], access_ok)
-
-    def verify_snapshot(self):
-        current = self.snapshot()
-        changed = [k for k in current if current[k] != self.state['snapshot'][k]]
-        if changed:
-            raise WorkflowError('Xung đột dữ liệu ngoài checkpoint: ' + ', '.join(changed))
+        if self.action('access', *requests['access']):
+            self.state['codeforces_access'] = requests['access'][1]['accessType']
+            self.save()
 
     def commit(self):
         self.step = 'commit'
-        self.verify_snapshot()
         meta = self.metadata()
         if self.state.get('pending') == 'commit':
             if meta['revision'] == self.state['revision'] + 1 and not meta['modified']:
@@ -558,7 +397,7 @@ class Workflow:
         if self.state and self.state.get('input_digest') != digest(self.parts):
             raise WorkflowError('Nội dung input khác checkpoint. Không tiếp tục ghi đè bài đang chạy.')
         self.create_or_recover()
-        self.initialize_snapshot()
+        self.initialize_info()
         # A pending commit may already have increased revision; reconcile before upload checks.
         if self.state.get('pending') == 'commit':
             self.commit()
@@ -567,7 +406,6 @@ class Workflow:
             self.commit()
         else:
             self.check_revision()
-            self.verify_snapshot()
         package = self.package()
         self.step = 'url'
         problem = self.metadata()
@@ -576,14 +414,13 @@ class Workflow:
                            profile=Path(self.options.get('browser_profile', '.polygon-browser')),
                            timeout=self.options.get('browser_timeout', 300))
         self.check_revision()
-        self.verify_snapshot()
-        access = next(a['accessType'] for a in self.read('problem.accesses') if a['login'] == 'codeforces')
+        access = self.state.get('codeforces_access', 'READ')
         result = {'problem_id': self.state['problem_id'], 'name': self.parts['name problem'],
                   'display_name': self.parts['name'], 'statement_language': 'vietnamese',
                   'test_count': self.state['test_count'], 'sample_indices': self.state['sample_indices'],
                   'codeforces_access': access, 'revision': self.state['revision'],
                   'package_id': package['id'], 'package_state': package['state'], 'problem_url': url,
-                  'info': self.read('problem.info')}
+                  'info': self.state['info']}
         output = Path(self.options.get('output_dir', '.'))
         atomic_json(output / 'result.json', result)
         output.mkdir(parents=True, exist_ok=True)

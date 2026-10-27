@@ -192,7 +192,7 @@ def main(argv=None):
                               'statement_language': 'vietnamese', 'sample_indices': options['sample_indices'],
                               'plan': ['create', 'info', 'statement', 'checker.cpp', 'checker', 'gen.cpp',
                                        'solution (MA)', 'script (tests)', 'samples from server indices',
-                                       'codeforces access', 'verify', 'commit', 'Standard package', 'official URL'],
+                                       'codeforces access', 'commit', 'Standard package', 'official URL'],
                               'defaults': 'Giữ mặc định Polygon cho tùy chọn chưa truyền; in giá trị khi chạy thật.',
                               'note': 'Sample tự động chỉ xác định sau khi Polygon triển khai script.'},
                              ensure_ascii=False, indent=2))
