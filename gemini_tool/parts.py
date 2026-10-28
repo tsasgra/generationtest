@@ -14,7 +14,7 @@ from .control import check_stop
 from .state import ordinary_directory
 
 
-DEFAULT_PROMPT = "apply polygon setter skill"
+DEFAULT_PROMPT = "Đây là đề một bài tập cp, hãy viết lại đề bằng cách sử dụng skill polygon-problem-setter và xuát ra các kết quả cần thiết để tôi đưa lên polygon"
 
 
 def output_destinations(output: Path, count: int) -> list[Path]:
