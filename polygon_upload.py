@@ -44,6 +44,7 @@ def indices(value):
 def parser():
     cli = argparse.ArgumentParser(description=__doc__)
     sub = cli.add_subparsers(dest='command', required=True)
+    sub.add_parser('start', help='Dừng phiên cũ, xóa dữ liệu local, tạo input trống rồi chờ điền để upload (Windows).')
     init = sub.add_parser('init', help='Tạo thư mục gồm 10 file .txt trống, mỗi file là một phần.')
     init.add_argument('--output', type=Path, default=Path('problem'), help='Thư mục mới để tạo 10 file .txt.')
     run = sub.add_parser('run', help='Kiểm tra và tạo một bài mới.')
@@ -99,6 +100,9 @@ def main(argv=None):
     workflow = None
     key = secret = None
     try:
+        if args.command == 'start':
+            from polygon_tool.start import start_fresh
+            return start_fresh(main)
         if args.command == 'init':
             init_directory(args.output)
             print(f'Đã tạo 10 file .txt trong {args.output}. Điền nội dung vào từng file trước khi run.')

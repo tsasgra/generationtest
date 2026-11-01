@@ -2,26 +2,31 @@
 
 Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục và tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
 
-## Bấm đúp để chạy trên Windows
+## Một file Start cho cả dừng, dọn và chạy
 
-Sau khi cập nhật hoặc tải repository về máy, điền đủ 10 file trong `problem/` rồi bấm đúp một trong các file sau tại thư mục chính:
+Chỉ cần **`start.bat`** ở thư mục chính. Mỗi lần mở Start là bắt đầu một bài mới theo thứ tự:
 
-| File | Chức năng |
-| --- | --- |
-| **`start.bat`** | Chạy upload ngay. Nếu đã có `run_state.json`, tự tiếp tục bài đó; nếu chưa có, tạo bài từ `problem/`. |
-| `start_resume.bat` | Tiếp tục bài trong `run_state.json`. Báo lỗi nếu chưa có checkpoint. |
-| `start_check.bat` | Kiểm tra đầu vào trong `problem/` bằng `--dry-run`, không gọi Polygon. |
-| **`stop.bat`** | Dừng uploader và xóa checkpoint/kết quả cục bộ của lần chạy trước trong thư mục này, để `start.bat` bắt đầu bài mới. |
+1. Dừng các tiến trình uploader cũ và tiến trình con của chúng.
+2. Xóa checkpoint, kết quả, dữ liệu chạy cũ và **toàn bộ thư mục `problem/`, kể cả 10 file đầu vào đã điền**.
+3. Tạo lại `problem/` với đúng 10 file `.txt` trống.
+4. Giữ cửa sổ mở để bạn điền nội dung bài mới. Khi điền và lưu xong, nhấn **Enter trong chính cửa sổ này**.
+5. Kiểm tra đủ 10 file rồi upload một bài. Nếu input còn thiếu/sai, chương trình báo lỗi và chờ bạn sửa rồi nhấn Enter lại; bước này không xóa lại nội dung vừa nhập.
 
-Các file start tự chuyển về thư mục repository và giữ cửa sổ mở để đọc kết quả/lỗi. Chúng tìm Python **3.10 trở lên** theo thứ tự: `.venv\Scripts\python.exe`, `py -3`, rồi `python`. Nếu máy đã có Python phù hợp, bạn không cần tạo virtual environment hoặc gõ lệnh để chạy phần API. Nếu chưa có, cửa sổ sẽ hướng dẫn cài Python.
+**Mở Start trước, điền nội dung sau.** Không mở thêm `start.bat` sau khi đã điền bài: lần mở mới sẽ xóa nội dung vừa điền. `note.txt` được để trống; chín file còn lại phải có nội dung. Nếu tên bài cũ đã tồn tại trên Polygon, dùng tên định danh mới trong `problem/name problem.txt`.
 
-Giữ nguyên cấu trúc thư mục, bao gồm `polygon_tool/launch_windows.cmd` dùng chung cho các file start. Khi tiếp tục, script dùng thư mục đầu vào đã lưu trong checkpoint. Nếu muốn chuyển sang bài mới, bấm **`stop.bat`**, sửa 10 file trong `problem/`, rồi bấm **`start.bat`**. Nếu tên định danh cũ đã tồn tại trên Polygon, điền tên mới trong `problem/name problem.txt`. Khi chưa bấm Stop, `start.bat` vẫn tiếp tục bài trong checkpoint, kể cả bài đã hoàn tất. Các tùy chọn nâng cao và trình duyệt lấy link vẫn dùng các lệnh bên dưới.
+Start dọn các dữ liệu của uploader trong repository:
 
-Để dừng, bấm đúp **`stop.bat`**. Công cụ nhận diện các lệnh Python chạy `polygon_upload.py run`, `resume` hoặc `init` (qua file start hoặc gõ trực tiếp), kiểm tra lại PID/thời điểm tạo tiến trình rồi dừng cả cây tiến trình bằng `taskkill /T /F`, bao gồm trình duyệt do lần chạy đó mở. Các bản sao repository đang chạy uploader cũng thuộc phạm vi dừng. Những chương trình Python khác không bị dừng theo tên chung `python.exe`. Các cửa sổ start đã chạy xong và đang chờ nhấn phím có thể vẫn mở.
+- Các file `run_state*.json` và file `.tmp`/`.lock` đi kèm, kể cả checkpoint hỏng; các checkpoint đặt tên riêng được nhận diện bằng cấu trúc JSON của uploader.
+- Các thư mục checkpoint `*.problems/` còn sót từ bản upload nhiều bài.
+- `result.json`, `problem_url.txt` và các bản `.tmp`, kể cả khi nằm trong thư mục kết quả con; toàn bộ `results/`.
+- Phiên trình duyệt mặc định `.polygon-browser/`, cache `__pycache__/` và file `.log` ở thư mục chính.
+- Mọi file/thư mục trong `problem/`, sau đó tạo lại đúng 10 file trống.
 
-Sau khi dừng tiến trình thành công, `stop.bat` xóa `run_state.json`, `run_state.json.tmp`, `run_state.json.lock`, `result.json`, `result.json.tmp`, `problem_url.txt` và `problem_url.txt.tmp` trong thư mục repository chứa file Stop. Việc xóa vẫn chạy khi uploader đã kết thúc hoặc checkpoint bị hỏng. Nếu không dừng được tiến trình hoặc checkpoint đang bị khóa, công cụ báo lỗi và chưa xóa checkpoint. Checkpoint đặt tên riêng bằng `--state`, kết quả ở thư mục khác và checkpoint của bản sao repository khác không nằm trong phạm vi xóa.
+`.env`, mã nguồn, tài liệu, Git, môi trường Python và thư mục phát triển `work/` được giữ lại. Công cụ chỉ dọn dữ liệu trong repository, không lần theo đường dẫn trong checkpoint ra ngoài thư mục này. Các thư mục liên kết được bỏ qua hoặc báo lỗi nếu là mục cần xóa. Checkpoint đang khóa hoặc tiến trình không dừng được sẽ làm Start dừng trước khi dọn đầu vào và upload.
 
-Stop giữ lại 10 file đầu vào, `.env` và mã nguồn. Bài đã tải lên Polygon vẫn tồn tại; request hoặc package mà Polygon đã nhận có thể tiếp tục trên máy chủ. Nếu chỉ muốn tạm dừng để tiếp tục cùng bài, dùng **Ctrl+C** trong cửa sổ đang chạy, sau đó dùng `start_resume.bat`. File Stop cần Python 3.10 trở lên và Windows PowerShell có sẵn trên máy, chạy bằng cùng tài khoản/quyền với uploader.
+`stop.bat`, `start_check.bat`, `start_resume.bat` và launcher CMD trung gian đã được bỏ. Có thể nhấn **Ctrl+C** để dừng trong cửa sổ Start. Khi muốn tiếp tục bài đang dở và giữ input/checkpoint, dùng lệnh `resume` trong mục bên dưới; mở Start luôn tạo phiên mới. Bài và tác vụ đã gửi lên Polygon vẫn tồn tại trên server.
+
+Start tìm Python **3.10 trở lên** theo thứ tự: `.venv\Scripts\python.exe`, `py -3`, rồi `python`. Cần Windows PowerShell có sẵn để dừng tiến trình. Công cụ nhận diện lệnh `polygon_upload.py start`, `run`, `resume`, `init`, kiểm tra PID/thời điểm tạo rồi dừng cả cây tiến trình bằng `taskkill /T /F`; uploader từ các bản sao repository khác cũng thuộc phạm vi dừng như trước. Các chương trình Python khác và tiến trình cha đang chạy Start mới được giữ nguyên.
 
 ## Cài đặt trên Windows / PowerShell
 
@@ -34,7 +39,7 @@ py -m venv .venv
 
 Phần API dùng thư viện chuẩn Python nên `requirements.txt` không có dependency bắt buộc. Các lệnh dưới dùng trực tiếp Python trong virtual environment, không cần đổi Execution Policy hoặc kích hoạt môi trường.
 
-Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Repository private này đã kèm `.env` theo cấu hình của chủ repo; bản clone từ GitHub có sẵn cấu hình để chạy. Điền đủ 10 file trong `problem/` trước khi upload.
+Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Repository private này đã kèm `.env` theo cấu hình của chủ repo; bản clone từ GitHub có sẵn cấu hình để chạy. Nếu dùng `start.bat`, mở Start trước rồi mới điền 10 file trong `problem/` khi cửa sổ yêu cầu.
 
 Nếu muốn dùng tài khoản Polygon khác, sửa hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong `.env`. Script không in credentials hoặc ghi chúng vào checkpoint/kết quả; các giá trị trong `.env` được đọc nguyên văn, không chạy như lệnh shell.
 
@@ -51,7 +56,7 @@ Các biến chỉ có hiệu lực trong phiên PowerShell hiện tại và các
 
 ## Chuẩn bị 10 file đầu vào
 
-Repository có một bộ 10 file đầu vào trống trong thư mục `problem/`. Điền nội dung trực tiếp vào bộ file này. Nếu cần tạo một bộ mới:
+Repository có một bộ 10 file đầu vào trống trong thư mục `problem/`. Start tự tạo lại bộ này mỗi lần chạy; chỉ điền nội dung sau khi Start đã dọn xong. Nếu dùng CLI trực tiếp, bạn có thể chuẩn bị đầu vào trước mà không chạy Start. Để tạo một bộ ở thư mục mới:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py init --output my_problem
@@ -158,7 +163,7 @@ Nếu không truyền time limit, memory limit hoặc tên file, CLI giữ mặc
 
 ## Tiếp tục khi bị gián đoạn
 
-Giữ nguyên thư mục gồm 10 file đầu vào và checkpoint, rồi chạy:
+**Không mở lại `start.bat` nếu muốn resume**, vì Start sẽ xóa input và checkpoint. Giữ nguyên thư mục gồm 10 file đầu vào và checkpoint, rồi chạy:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py resume --state run_state.json
@@ -170,7 +175,7 @@ Nếu đang dở một trong bốn request upload này, `resume` gửi lại và
 
 Các tình huống cần xử lý:
 
-- **Kẹt tại `checker.cpp`, `gen.cpp`, `solution` hoặc `script` do lỗi đọc lại của bản cũ:** cập nhật repository, giữ nguyên bộ đầu vào và `run_state.json`, rồi bấm `start_resume.bat`. Công cụ gửi lại bước đang dở và tiếp tục trên cùng bài, không còn lỗi so sánh byte/nội dung cho bốn phần này.
+- **Kẹt tại `checker.cpp`, `gen.cpp`, `solution` hoặc `script` do lỗi đọc lại của bản cũ:** cập nhật repository, giữ nguyên bộ đầu vào và `run_state.json`, rồi chạy `python polygon_upload.py resume --state run_state.json`. Công cụ gửi lại bước đang dở và tiếp tục trên cùng bài, không còn lỗi so sánh byte/nội dung cho bốn phần này.
 - **Files đã có `checker.cpp` nhưng Checker vẫn là `None`:** tải file và chọn checker là hai bước riêng. Bản hiện tại chọn checker sau khi API xác nhận tải file thành công. Chạy `resume` với checkpoint cũ để hoàn tất bước còn thiếu. Nếu bạn đã chọn đúng `checker.cpp` trên web, công cụ xác nhận lựa chọn đó. Với checkpoint cũ đang chờ kết quả tải `gen.cpp`, công cụ xử lý request đang chờ trước rồi mới chọn checker.
 - **Không nhận diện được sample:** kiểm tra chỉ số trong Tests rồi chạy `resume --state run_state.json --sample-indices 1,3`. Với resume thông thường, chỉ đổi danh sách sample trước commit.
 - **Hết thời gian poll:** chạy `resume` để chờ tiếp cùng package; có thể tăng `--poll-timeout 1800`.
@@ -216,9 +221,9 @@ Trình duyệt mở để bạn đăng nhập thủ công lần đầu và mở 
 
 Bộ kiểm thử offline/mock được giữ riêng trong workspace phát triển, không đưa lên GitHub. Repository chứa mã chạy, cấu hình và một bộ 10 file đầu vào trong `problem/`.
 
-Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu.
+Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu. Luồng Start mới được kiểm thử offline/mock về dừng tiến trình, bảo vệ tiến trình hiện tại và tiến trình cha, xóa dữ liệu cũ, tạo lại đúng 10 file trống, bảo vệ `.env`/mã nguồn, checkpoint đang khóa, chờ điền input và giữ nội dung khi kiểm tra lại.
 
 
-**Chưa kiểm thử end-to-end trên tài khoản Polygon thật trong môi trường phát triển này:** kết nối mạng cloud đến Polygon chưa khả dụng. Khả năng compiler phía server, tải file thật, render statement, phiên đăng nhập browser và package thực tế cần được xác nhận bằng lần chạy của bạn. Không có problem ID, package hoặc link thành công thật được tạo sẵn trong repository.
+**Chưa chạy Start trên Windows hoặc kiểm thử end-to-end với tài khoản Polygon thật trong môi trường phát triển này.** Khả năng compiler phía server, tải file thật, render statement, phiên đăng nhập browser và package thực tế cần được xác nhận bằng lần chạy của bạn. Không có problem ID, package hoặc link thành công thật được tạo sẵn trong repository.
 
 API được đối chiếu với [tài liệu Polygon API chính thức](https://codeforces.github.io/polygon-misc/API), gồm `notes`, tag `MA`, `testUseInStatements`, `problem.setAccess`, commit và package. [Trang apiHelp](https://polygon.codeforces.com/apiHelp) là điểm tra cứu bổ sung trên Polygon.

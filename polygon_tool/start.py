@@ -1,4 +1,4 @@
-"""Stop Windows uploader process trees and reset the launcher's local run."""
+"""Stop the previous Windows session, clear its data, and start a new problem."""
 from __future__ import annotations
 
 import json
@@ -8,6 +8,8 @@ import re
 import subprocess
 import sys
 
+from .cleanup import reset_workspace
+from .input import parse_problem
 from .workflow import WorkflowError, state_lock
 
 
@@ -22,15 +24,14 @@ _UPLOADER_COMMAND = re.compile(
     rf'^\s*{_ARG}\s+'
     rf'(?:(?:-[23](?:\.\d+)?(?:-(?:32|64))?|-[uBEIsSOqv]+|'
     rf'-[WX]\s+{_ARG})\s+)*'
-    rf'(?P<script>{_ARG})\s+(?:run|resume|init)(?=\s|$)', re.IGNORECASE)
+    rf'(?P<script>{_ARG})\s+(?:start|run|resume|init)(?=\s|$)', re.IGNORECASE)
 
 _PROCESS_QUERY = r'''
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Get-CimInstance Win32_Process |
-    Where-Object { $_.Name -match '^(py|pythonw?|python\d+(\.\d+)*)\.exe$' } |
-    Select-Object ProcessId, Name, CommandLine,
-        @{Name='Created'; Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} |
+    Select-Object ProcessId, ParentProcessId, Name, CommandLine,
+        @{Name='Created'; Expression={if ($null -ne $_.CreationDate) {$_.CreationDate.ToUniversalTime().ToString('o')} else {''}}} |
     ConvertTo-Json -Compress
 '''
 
@@ -63,7 +64,17 @@ def same_process(expected: dict, current: dict) -> bool:
 
 
 def stop_uploads() -> tuple[int, list[int]]:
-    targets = [row for row in list_processes() if is_uploader(row)]
+    processes = list_processes()
+    parents = {row['ProcessId']: row.get('ParentProcessId') for row in processes}
+    # py -3 can remain alive as our parent. Killing its process tree would also
+    # kill this new Start before cleanup. Protect the whole current ancestry.
+    protected = {os.getpid()}
+    parent = os.getppid()
+    while parent and parent not in protected:
+        protected.add(parent)
+        parent = parents.get(parent)
+    targets = [row for row in processes
+               if row.get('ProcessId') not in protected and is_uploader(row)]
     stopped, failed = 0, []
     for target in targets:
         # Recheck identity just before taskkill. Parent termination may already
@@ -81,51 +92,36 @@ def stop_uploads() -> tuple[int, list[int]]:
     return stopped, failed
 
 
-def reset_checkpoint(directory: Path) -> None:
-    """Clear only this repository's default launcher state and output files."""
-    state = directory / 'run_state.json'
-    # Even an idle/failed run needs resetting. Do not parse its JSON: a damaged
-    # checkpoint must also be removable. The lock prevents deleting active state.
-    with state_lock(state):
-        for name in ('run_state.json.tmp', 'result.json.tmp', 'problem_url.txt.tmp',
-                     'result.json', 'problem_url.txt', 'run_state.json'):
-            (directory / name).unlink(missing_ok=True)
-    # Windows requires the lock handle to be closed before deleting its file.
-    state.with_name(state.name + '.lock').unlink(missing_ok=True)
-
-
-def main() -> int:
+def start_fresh(run_cli, directory: Path = REPOSITORY_DIR) -> int:
     if os.name != 'nt':
-        print('stop.bat chỉ dùng trên Windows.', file=sys.stderr)
+        print('Luồng Start tự dừng tiến trình chỉ dùng trên Windows.', file=sys.stderr)
         return 1
+    directory = directory.resolve()
     try:
         stopped, failed = stop_uploads()
-    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
-        print('Không thể hoàn tất việc dừng. Kiểm tra quyền truy cập tiến trình trên Windows.',
-              file=sys.stderr)
+        if failed:
+            raise WorkflowError('Chưa dừng được các tiến trình PID: ' + ', '.join(map(str, failed)))
+        print(f'Đã dừng {stopped} tiến trình uploader cũ cùng các tiến trình con.')
+        with state_lock(directory / '.polygon-start'):
+            reset_workspace(directory)
+            print('Đã xóa checkpoint, dữ liệu chạy cũ và toàn bộ nội dung problem/.')
+            print(f'Đã tạo lại 10 file trống trong {directory / "problem"}.')
+            print('Điền nội dung bài mới vào các file này. Giữ cửa sổ này mở.')
+            print('Khi đã điền xong, nhấn Enter ở đây để kiểm tra và upload.')
+            while True:
+                input('Nhấn Enter khi đã lưu đủ nội dung (Ctrl+C để thoát): ')
+                try:
+                    parse_problem(directory / 'problem')
+                except (OSError, ValueError) as exc:
+                    print(f'Đầu vào chưa hợp lệ: {exc}', file=sys.stderr)
+                    print('Sửa các file rồi nhấn Enter lại; nội dung vừa điền sẽ được giữ nguyên.')
+                    continue
+                return run_cli(['run', '--input', str(directory / 'problem'),
+                                '--state', str(directory / 'run_state.json'),
+                                '--output-dir', str(directory)])
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        print(f'Không thể bắt đầu phiên mới: {exc}', file=sys.stderr)
         return 1
-    if failed:
-        print('Chưa dừng được các tiến trình PID: ' + ', '.join(map(str, failed)), file=sys.stderr)
-        return 1
-    if stopped:
-        print(f'Đã dừng {stopped} tiến trình uploader cùng các tiến trình con.')
-    else:
-        print('Không còn tiến trình uploader phù hợp đang chạy.')
-    try:
-        reset_checkpoint(REPOSITORY_DIR)
-    except (OSError, WorkflowError) as exc:
-        print(f'Chưa xóa hết checkpoint/kết quả cũ: {exc}', file=sys.stderr)
-        print('Đóng uploader rồi bấm stop.bat lại trước khi chạy bài mới.', file=sys.stderr)
-        return 1
-    print('Đã xóa checkpoint và kết quả cục bộ của lần chạy trước.')
-    print('Sửa nội dung trong problem, rồi bấm start.bat để bắt đầu bài mới.')
-    print('Dùng tên định danh mới trong problem/name problem.txt nếu tên cũ đã có trên Polygon.')
-    print('Bài đã tải và tác vụ Polygon đã nhận vẫn ở trên máy chủ.')
-    return 0
-
-
-if __name__ == '__main__':
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, 'reconfigure'):
-            stream.reconfigure(encoding='utf-8')
-    raise SystemExit(main())
+    except (KeyboardInterrupt, EOFError):
+        print('\nĐã dừng. Mở lại start.bat sẽ xóa dữ liệu local và bắt đầu phiên mới.')
+        return 130
