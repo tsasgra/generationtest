@@ -41,7 +41,7 @@ goto done
 
 :execution_failed
 echo Chưa hoàn tất. Hãy xem thông báo lỗi phía trên.
-echo Mở lại start.bat sẽ xóa dữ liệu local, kể cả nội dung trong problem.
+echo Mở lại start.bat sẽ xóa checkpoint và kết quả cũ, giữ nguyên nội dung trong problem.
 echo Nếu muốn tiếp tục bài đang dở, dùng lệnh resume được in khi upload lỗi.
 goto done
 

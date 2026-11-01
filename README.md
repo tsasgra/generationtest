@@ -7,22 +7,21 @@ Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục
 Chỉ cần **`start.bat`** ở thư mục chính. Mỗi lần mở Start là bắt đầu một bài mới theo thứ tự:
 
 1. Dừng các tiến trình uploader cũ và tiến trình con của chúng.
-2. Xóa checkpoint, kết quả, dữ liệu chạy cũ và **toàn bộ thư mục `problem/`, kể cả 10 file đầu vào đã điền**.
-3. Tạo lại `problem/` với đúng 10 file `.txt` trống.
-4. Giữ cửa sổ mở để bạn điền nội dung bài mới. Khi điền và lưu xong, nhấn **Enter trong chính cửa sổ này**.
+2. Xóa checkpoint, kết quả và dữ liệu chạy cũ; **giữ nguyên toàn bộ thư mục `problem/` và nội dung 10 file đầu vào**.
+3. Chỉ tạo bộ 10 file trống nếu thư mục `problem/` chưa tồn tại; không xóa hoặc ghi đè file đã có.
+4. Giữ cửa sổ mở để bạn kiểm tra hoặc cập nhật nội dung bài. Khi điền và lưu xong, nhấn **Enter trong chính cửa sổ này**.
 5. Kiểm tra đủ 10 file rồi upload một bài. Nếu input còn thiếu/sai, chương trình báo lỗi và chờ bạn sửa rồi nhấn Enter lại; bước này không xóa lại nội dung vừa nhập.
 
-**Mở Start trước, điền nội dung sau.** Không mở thêm `start.bat` sau khi đã điền bài: lần mở mới sẽ xóa nội dung vừa điền. `note.txt` được để trống; chín file còn lại phải có nội dung. Nếu tên bài cũ đã tồn tại trên Polygon, dùng tên định danh mới trong `problem/name problem.txt`.
+**Có thể điền đủ 10 file trước khi mở Start.** Mỗi lần mở `start.bat`, nội dung đã điền vẫn được giữ nguyên; checkpoint và kết quả của phiên trước sẽ bị xóa. `note.txt` được để trống; chín file còn lại phải có nội dung. Nếu tên bài cũ đã tồn tại trên Polygon, dùng tên định danh mới trong `problem/name problem.txt`.
 
-Start dọn các dữ liệu của uploader trong repository:
+Start dọn các dữ liệu của uploader trong repository, ngoại trừ toàn bộ thư mục `problem/`:
 
 - Các file `run_state*.json` và file `.tmp`/`.lock` đi kèm, kể cả checkpoint hỏng; các checkpoint đặt tên riêng được nhận diện bằng cấu trúc JSON của uploader.
 - Các thư mục checkpoint `*.problems/` còn sót từ bản upload nhiều bài.
 - `result.json`, `problem_url.txt` và các bản `.tmp`, kể cả khi nằm trong thư mục kết quả con; toàn bộ `results/`.
 - Phiên trình duyệt mặc định `.polygon-browser/`, cache `__pycache__/` và file `.log` ở thư mục chính.
-- Mọi file/thư mục trong `problem/`, sau đó tạo lại đúng 10 file trống.
 
-`.env`, mã nguồn, tài liệu, Git, môi trường Python và thư mục phát triển `work/` được giữ lại. Công cụ chỉ dọn dữ liệu trong repository, không lần theo đường dẫn trong checkpoint ra ngoài thư mục này. Các thư mục liên kết được bỏ qua hoặc báo lỗi nếu là mục cần xóa. Checkpoint đang khóa hoặc tiến trình không dừng được sẽ làm Start dừng trước khi dọn đầu vào và upload.
+`problem/`, `.env`, mã nguồn, tài liệu, Git, môi trường Python và thư mục phát triển `work/` được giữ lại. Công cụ chỉ dọn dữ liệu trong repository, không lần theo đường dẫn trong checkpoint ra ngoài thư mục này. Các thư mục liên kết được bỏ qua hoặc báo lỗi nếu là mục cần xóa. Checkpoint đang khóa hoặc tiến trình không dừng được sẽ làm Start dừng trước khi dọn dữ liệu chạy cũ và upload.
 
 `stop.bat`, `start_check.bat`, `start_resume.bat` và launcher CMD trung gian đã được bỏ. Có thể nhấn **Ctrl+C** để dừng trong cửa sổ Start. Khi muốn tiếp tục bài đang dở và giữ input/checkpoint, dùng lệnh `resume` trong mục bên dưới; mở Start luôn tạo phiên mới. Bài và tác vụ đã gửi lên Polygon vẫn tồn tại trên server.
 
@@ -39,7 +38,7 @@ py -m venv .venv
 
 Phần API dùng thư viện chuẩn Python nên `requirements.txt` không có dependency bắt buộc. Các lệnh dưới dùng trực tiếp Python trong virtual environment, không cần đổi Execution Policy hoặc kích hoạt môi trường.
 
-Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Repository private này đã kèm `.env` theo cấu hình của chủ repo; bản clone từ GitHub có sẵn cấu hình để chạy. Nếu dùng `start.bat`, mở Start trước rồi mới điền 10 file trong `problem/` khi cửa sổ yêu cầu.
+Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Repository private này đã kèm `.env` theo cấu hình của chủ repo; bản clone từ GitHub có sẵn cấu hình để chạy. Bạn có thể điền 10 file trong `problem/` trước khi mở `start.bat`, rồi nhấn Enter trong cửa sổ Start để upload.
 
 Nếu muốn dùng tài khoản Polygon khác, sửa hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong `.env`. Script không in credentials hoặc ghi chúng vào checkpoint/kết quả; các giá trị trong `.env` được đọc nguyên văn, không chạy như lệnh shell.
 
@@ -56,7 +55,7 @@ Các biến chỉ có hiệu lực trong phiên PowerShell hiện tại và các
 
 ## Chuẩn bị 10 file đầu vào
 
-Repository có một bộ 10 file đầu vào trống trong thư mục `problem/`. Start tự tạo lại bộ này mỗi lần chạy; chỉ điền nội dung sau khi Start đã dọn xong. Nếu dùng CLI trực tiếp, bạn có thể chuẩn bị đầu vào trước mà không chạy Start. Để tạo một bộ ở thư mục mới:
+Repository có một bộ 10 file đầu vào trống trong thư mục `problem/`. Start giữ nguyên bộ file và nội dung đã có; chỉ tạo bộ trống khi cả thư mục `problem/` chưa tồn tại. Nếu dùng CLI trực tiếp, bạn có thể chuẩn bị đầu vào trước mà không chạy Start. Để tạo một bộ ở thư mục mới:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py init --output my_problem
@@ -167,7 +166,7 @@ Nếu không truyền time limit, memory limit hoặc tên file, CLI giữ mặc
 
 ## Tiếp tục khi bị gián đoạn
 
-**Không mở lại `start.bat` nếu muốn resume**, vì Start sẽ xóa input và checkpoint. Giữ nguyên thư mục gồm 10 file đầu vào và checkpoint, rồi chạy:
+**Không mở lại `start.bat` nếu muốn resume**, vì Start sẽ xóa checkpoint (input vẫn được giữ). Giữ nguyên thư mục gồm 10 file đầu vào và checkpoint, rồi chạy:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py resume --state run_state.json
@@ -227,7 +226,7 @@ Trình duyệt mở để bạn đăng nhập thủ công lần đầu và mở 
 
 Bộ kiểm thử offline/mock được giữ riêng trong workspace phát triển, không đưa lên GitHub. Repository chứa mã chạy, cấu hình và một bộ 10 file đầu vào trong `problem/`.
 
-Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu. Luồng Start mới được kiểm thử offline/mock về dừng tiến trình, bảo vệ tiến trình hiện tại và tiến trình cha, xóa dữ liệu cũ, tạo lại đúng 10 file trống, bảo vệ `.env`/mã nguồn, checkpoint đang khóa, chờ điền input và giữ nội dung khi kiểm tra lại.
+Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu. Luồng Start mới được kiểm thử offline/mock về dừng tiến trình, bảo vệ tiến trình hiện tại và tiến trình cha, xóa dữ liệu chạy cũ, giữ nguyên byte của đầu vào, chỉ tạo 10 file trống khi thiếu thư mục, bảo vệ `.env`/mã nguồn, checkpoint đang khóa, chờ điền input và giữ nội dung khi kiểm tra lại.
 
 
 **Chưa chạy Start trên Windows hoặc kiểm thử end-to-end với tài khoản Polygon thật trong môi trường phát triển này.** Khả năng compiler phía server, tải file thật, render statement, phiên đăng nhập browser và package thực tế cần được xác nhận bằng lần chạy của bạn. Không có problem ID, package hoặc link thành công thật được tạo sẵn trong repository.

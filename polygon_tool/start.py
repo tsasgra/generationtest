@@ -104,9 +104,9 @@ def start_fresh(run_cli, directory: Path = REPOSITORY_DIR) -> int:
         print(f'Đã dừng {stopped} tiến trình uploader cũ cùng các tiến trình con.')
         with state_lock(directory / '.polygon-start'):
             reset_workspace(directory)
-            print('Đã xóa checkpoint, dữ liệu chạy cũ và toàn bộ nội dung problem/.')
-            print(f'Đã tạo lại 10 file trống trong {directory / "problem"}.')
-            print('Điền nội dung bài mới vào các file này. Giữ cửa sổ này mở.')
+            print('Đã xóa checkpoint và dữ liệu chạy cũ. Nội dung trong problem/ được giữ nguyên.')
+            print(f'Thư mục đầu vào: {directory / "problem"}.')
+            print('Kiểm tra hoặc cập nhật nội dung 10 file. Giữ cửa sổ này mở.')
             print('Khi đã điền xong, nhấn Enter ở đây để kiểm tra và upload.')
             while True:
                 input('Nhấn Enter khi đã lưu đủ nội dung (Ctrl+C để thoát): ')
@@ -123,5 +123,5 @@ def start_fresh(run_cli, directory: Path = REPOSITORY_DIR) -> int:
         print(f'Không thể bắt đầu phiên mới: {exc}', file=sys.stderr)
         return 1
     except (KeyboardInterrupt, EOFError):
-        print('\nĐã dừng. Mở lại start.bat sẽ xóa dữ liệu local và bắt đầu phiên mới.')
+        print('\nĐã dừng. Mở lại start.bat sẽ dọn checkpoint/kết quả cũ, giữ nguyên problem/.')
         return 130

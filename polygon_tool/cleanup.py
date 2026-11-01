@@ -1,4 +1,4 @@
-"""Remove uploader-owned local data before preparing a blank single problem."""
+"""Remove uploader-owned run data while preserving the problem input files."""
 from __future__ import annotations
 
 from contextlib import ExitStack
@@ -55,25 +55,28 @@ def _remove(path: Path, locked: set[Path]) -> None:
 
 
 def reset_workspace(directory: Path) -> None:
-    """Clear known run data inside this repository, preserving code and .env.
+    """Clear known run data, preserving problem/, code, and .env.
 
     No paths from checkpoint contents are followed. Damaged default checkpoints
     and leftover batch checkpoints are removable without valid JSON.
     """
     directory = directory.resolve()
+    problem = directory / 'problem'
+    if (problem.exists() or problem.is_symlink()) and _linked(problem):
+        raise WorkflowError('Thư mục problem là liên kết; không dọn để tránh ảnh hưởng dữ liệu đầu vào.')
     files, trees, states = set(), set(), {directory / 'run_state.json'}
-    for name in ('problem', 'results', '.polygon-browser'):
+    for name in ('results', '.polygon-browser'):
         path = directory / name
         if path.exists() or path.is_symlink():
             trees.add(path)
 
     def scan(folder: Path, owned=False, batch_states=False):
         for path in folder.iterdir():
-            if path.name == '.env' and folder == directory:
+            if path.name in {'.env', 'problem'} and folder == directory:
                 continue
             if not owned and path.name in _PROTECTED:
                 continue
-            # Refuse linked cleanup targets before deleting ANY old input.
+            # Refuse linked cleanup targets before deleting any old run data.
             if _linked(path):
                 if owned or path in trees or path.name in _RESULTS or path.name.startswith('run_state'):
                     raise WorkflowError(f'Không dọn dữ liệu qua liên kết: {path.name}')
@@ -109,4 +112,5 @@ def reset_workspace(directory: Path) -> None:
         lock.unlink(missing_ok=True)
     for path in sorted(trees, key=lambda p: len(p.parts), reverse=True):
         _remove(path, set())
-    init_directory(directory / 'problem')
+    if not problem.exists():
+        init_directory(problem)
