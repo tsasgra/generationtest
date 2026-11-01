@@ -47,6 +47,7 @@ def detect_sample_indices(
     tests: Iterable[Mapping[str, Any]],
     explicit: Iterable[int] | str | None = None,
 ) -> list[int]:
+    """Include every generated sample, existing manual example, and explicit index."""
     tests = list(tests)
     by_index: dict[int, Mapping[str, Any]] = {}
     for test in tests:
@@ -59,23 +60,24 @@ def detect_sample_indices(
     if not by_index:
         raise ValueError("Polygon chưa trả về test nào sau khi lưu script.")
 
+    indices = {
+        index
+        for index, test in by_index.items()
+        if (not test.get("manual", False)
+            and isinstance(test.get("scriptLine"), str)
+            and is_sample_command(test["scriptLine"]))
+        or (test.get("manual") is True and test.get("useInStatements") is True)
+    }
     if explicit is not None:
-        indices = parse_sample_indices(explicit) if isinstance(explicit, str) else list(explicit)
-        if any(isinstance(index, bool) or not isinstance(index, int) or index <= 0 for index in indices):
+        additional = parse_sample_indices(explicit) if isinstance(explicit, str) else list(explicit)
+        if any(isinstance(index, bool) or not isinstance(index, int) or index <= 0 for index in additional):
             raise ValueError("Danh sách sample chỉ được chứa chỉ số nguyên dương.")
-        if len(set(indices)) != len(indices):
+        if len(set(additional)) != len(additional):
             raise ValueError("Danh sách sample có chỉ số trùng.")
-        absent = sorted(set(indices) - by_index.keys())
+        absent = sorted(set(additional) - by_index.keys())
         if absent:
             raise ValueError("Không có test với sample index: " + ", ".join(map(str, absent)))
-    else:
-        indices = [
-            index
-            for index, test in by_index.items()
-            if not test.get("manual", False)
-            and isinstance(test.get("scriptLine"), str)
-            and is_sample_command(test["scriptLine"])
-        ]
+        indices.update(additional)
     if not indices:
         raise ValueError(
             "Không xác định được sample. Kiểm tra test thực tế trên Polygon rồi "

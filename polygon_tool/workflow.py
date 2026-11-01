@@ -436,6 +436,15 @@ class Workflow:
             else:
                 self.log('Đã xác nhận resource testlib.h trên Polygon.')
         self.upload_without_readback('script')
+        self.mark_samples()
+        def access_ok():
+            return any(a['login'] == 'codeforces' and a['accessType'] in ('READ', 'WRITE', 'OWNER')
+                       for a in self.read('problem.accesses'))
+        self.action('access', 'problem.setAccess', {'login': 'codeforces', 'accessType': 'READ'},
+                    ['accesses'], [lambda: self.read('problem.accesses')], access_ok)
+
+    def mark_samples(self):
+        """Mark every actual expanded sample index, then verify the complete set."""
         self.step = 'samples'
         tests = self.read('problem.tests', testset='tests', noInputs=True)
         samples = detect_sample_indices(tests, self.options.get('sample_indices'))
@@ -443,18 +452,40 @@ class Workflow:
             index, flag = test['index'], test['index'] in samples
             def flag_ok(index=index, flag=flag):
                 rows = self.read('problem.tests', testset='tests', noInputs=True)
-                return any(t['index'] == index and t['useInStatements'] == flag for t in rows)
+                return any(t['index'] == index and t.get('useInStatements') is flag for t in rows)
             self.action(f'sample:{index}', 'problem.saveTest', {'testset': 'tests', 'testIndex': index,
                         'testUseInStatements': flag}, ['tests'],
                         [lambda: self.read('problem.tests', testset='tests', noInputs=True)], flag_ok)
-        self.state['sample_indices'] = samples
-        self.state['test_count'] = len(tests)
+        self.verify_samples(required=samples)
+        confirmed = self.state['sample_indices']
+        self.log(f'Đã xác nhận Example cho tất cả {len(confirmed)} test sample: '
+                 + ', '.join(map(str, confirmed)) + '.')
+
+    def verify_samples(self, required=None):
+        """Never commit/build/report success with a sample missing Example."""
+        tests = self.read('problem.tests', testset='tests', noInputs=True)
+        required = self.state.get('sample_indices', []) if required is None else required
+        marked = {test['index'] for test in tests if test.get('useInStatements') is True}
+        missing_required = sorted(set(required) - marked)
+        if missing_required:
+            raise WorkflowError('Test sample chưa bật Example hoặc đã biến mất: '
+                                + ', '.join(map(str, missing_required)) + '.')
+        samples = detect_sample_indices(tests, self.options.get('sample_indices'))
+        expected = set(samples) | set(required)
+        missing = [test['index'] for test in tests
+                   if test['index'] in expected and test.get('useInStatements') is not True]
+        invalid = [test['index'] for test in tests
+                   if test['index'] not in expected and test.get('useInStatements') is not False]
+        if missing or invalid:
+            details = []
+            if missing:
+                details.append('Test sample chưa bật Example: ' + ', '.join(map(str, sorted(missing))) + '.')
+            if invalid:
+                details.append('Cờ Example không đúng ở test thường: '
+                               + ', '.join(map(str, sorted(invalid))) + '.')
+            raise WorkflowError(' '.join(details) + ' Chưa thể xác nhận đầy đủ Example trên Polygon.')
+        self.state.update(sample_indices=sorted(expected), test_count=len(tests))
         self.save()
-        def access_ok():
-            return any(a['login'] == 'codeforces' and a['accessType'] in ('READ', 'WRITE', 'OWNER')
-                       for a in self.read('problem.accesses'))
-        self.action('access', 'problem.setAccess', {'login': 'codeforces', 'accessType': 'READ'},
-                    ['accesses'], [lambda: self.read('problem.accesses')], access_ok)
 
     def verify_snapshot(self):
         current = self.snapshot()
@@ -464,6 +495,7 @@ class Workflow:
 
     def commit(self):
         self.step = 'commit'
+        self.verify_samples()
         self.verify_snapshot()
         meta = self.metadata()
         if self.state.get('pending') == 'commit':
@@ -497,6 +529,7 @@ class Workflow:
 
     def package(self):
         self.step = 'package'
+        self.verify_samples()
         meta = self.check_revision()
         if meta['modified']:
             raise WorkflowError('Không build khi working copy còn thay đổi chưa commit.')
@@ -577,6 +610,7 @@ class Workflow:
                            timeout=self.options.get('browser_timeout', 300))
         self.check_revision()
         self.verify_snapshot()
+        self.verify_samples()
         access = next(a['accessType'] for a in self.read('problem.accesses') if a['login'] == 'codeforces')
         result = {'problem_id': self.state['problem_id'], 'name': self.parts['name problem'],
                   'display_name': self.parts['name'], 'statement_language': 'vietnamese',

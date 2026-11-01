@@ -63,7 +63,8 @@ def parser():
     correction.add_argument('--retry-failed-package', action='store_true', help='Chủ động build lại package FAILED, giữ revision.')
     for command in (run, resume):
         command.add_argument('--state', type=Path, default=Path('run_state.json'))
-        command.add_argument('--sample-indices', type=indices)
+        command.add_argument('--sample-indices', type=indices,
+                             help='Bổ sung index làm Example; luôn giữ mọi test sample tự nhận diện.')
         command.add_argument('--output-dir', type=Path, default=None)
         command.add_argument('--request-timeout', type=positive, default=None)
         command.add_argument('--retries', type=nonnegative_int, default=None)

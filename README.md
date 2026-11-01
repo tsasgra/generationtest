@@ -139,13 +139,17 @@ Nếu muốn tách checkpoint/kết quả của từng bài:
 
 Sample tự động được nhận diện từ token hoặc giá trị tham số bằng đúng `sample` trong trường `scriptLine` của từng test Polygon đã triển khai, ví dụ `gen sample 1 > $` hoặc `gen --mode=sample --id=2 > $`. Các từ `nonsample`, `not_sample`, `sample.txt` không khớp. Công cụ dùng `index` của test thực tế, không dùng số dòng script; điều này áp dụng cả khi script có FreeMarker/vòng lặp.
 
-Có thể ưu tiên danh sách chỉ số cụ thể:
+Có thể **bổ sung** các chỉ số làm Example bằng `--sample-indices`. Danh sách này được hợp với toàn bộ sample tự nhận diện, không thay thế chúng:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py run --input my_problem --sample-indices 1,3
 ```
 
-Chỉ cờ `testUseInStatements` được cập nhật. Input và lệnh sinh test không được gửi lại khi đánh dấu sample. Test thường được đặt cờ false. Nếu không tìm được sample, công cụ dừng tại checkpoint, không tự lấy test đầu tiên.
+Tất cả test `gen sample ...` đều được bật `testUseInStatements=true`, kể cả khi chỉ truyền một phần danh sách vào `--sample-indices`. Các test thủ công đã bật Example cũng được giữ. Test thường không nằm trong danh sách bổ sung được đặt cờ false. Chỉ cờ Example được cập nhật; input và lệnh sinh test không được gửi lại.
+
+Sau khi đánh dấu, CLI đọc lại toàn bộ danh sách test và in ví dụ: `Đã xác nhận Example cho tất cả 3 test sample: 1, 3, 7.` Công cụ kiểm tra lại trước commit, trước build/poll package và trước khi ghi kết quả thành công, kể cả khi resume. Nếu còn sample thiếu cờ Example, mất test hoặc phản hồi không xác nhận cờ boolean, công cụ báo lỗi và không báo thành công. Checkpoint cũ đã commit nhưng còn thiếu Example cũng bị chặn trước build; không tự coi package cũ là đã sửa.
+
+Trên trang Tests của Polygon, **`Y` ở cột Example** nghĩa là test đã được chọn làm ví dụ. Ô checkbox ở mép phải chỉ dùng để chọn dòng cho thao tác hàng loạt. Nếu không nhận diện được sample, công cụ dừng tại checkpoint, không tự lấy test đầu tiên.
 
 | Tùy chọn | Giá trị / hành vi |
 | --- | --- |
