@@ -1,6 +1,6 @@
 # Polygon Upload — 10 file .txt
 
-Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục và tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, commit và chờ package Standard hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
+Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục và tải nội dung bạn đã chuẩn bị lên Codeforces Polygon: tạo bài, lưu statement tiếng Việt, gán checker, tải generator và lời giải chính, lưu script test, đánh dấu sample, cấp quyền cho `codeforces`, Commit Changes rồi tạo package **Full**, bật **Verify** và chờ hoàn thành. Nội dung đề và mã C++ không được AI viết lại. Kết quả cuối là link bài Polygon; bạn tự thêm bài vào Gym/Mashup.
 
 ## Một file Start cho cả dừng, dọn và chạy
 
@@ -119,11 +119,11 @@ Một lần chạy thành công thực hiện:
 2. Lưu và đọc lại statement `vietnamese`; tải `checker.cpp`, gọi `problem.setChecker` để chọn file này làm checker (tương đương nút **Set checker**), rồi đọc `problem.checker` xác nhận lựa chọn. Khi thành công, CLI in `Đã xác nhận checker đang dùng trên Polygon: checker.cpp.`, sau đó mới tải `gen.cpp` và lưu `solution.cpp` với tag `MA`. Không đọc lại nội dung ba file này.
 3. Lưu script test, lấy danh sách test thực tế từ Polygon, cập nhật cờ Example và kiểm tra lại.
 4. Thêm READ cho đúng login `codeforces` nếu chưa có quyền đọc. Quyền READ/WRITE/OWNER đã có được giữ; quyền của tài khoản khác không bị sửa.
-5. Kiểm tra các cấu hình đang theo dõi và cảnh báo Polygon, commit, xác nhận revision sạch, yêu cầu package Standard với `full=false`, `verify=true`.
-6. Poll đúng package ID của revision đó đến `READY`; trạng thái `FAILED` luôn là lỗi.
+5. Sau khi upload đủ nội dung 10 file và xác nhận mọi sample đã bật Example, thực hiện **Commit Changes**. Chỉ khi Polygon xác nhận commit thành công, revision đã tăng và working copy sạch, công cụ mới gọi **Create package → Full**, với **Verify bật** (`full=true`, `verify=true`).
+6. Poll đúng package ID của revision đó đến `READY`; nếu package Full `FAILED` thì báo lỗi, không tự build lại hoặc báo thành công.
 7. Lấy link chính thức, lưu `result.json` và `problem_url.txt`.
 
-JSON kết quả gồm problem ID, tên định danh, tên hiển thị, ngôn ngữ, số test, sample indices, quyền `codeforces`, revision, package ID/trạng thái, link bài và giới hạn/tên file thực tế. Thông báo tiến độ nằm ở stderr. Để stdout chỉ có link sau khi thành công:
+JSON kết quả gồm problem ID, tên định danh, tên hiển thị, ngôn ngữ, số test, sample indices, quyền `codeforces`, revision, package ID/trạng thái, `package_full: true`, `package_verify: true`, link bài và giới hạn/tên file thực tế. Thông báo tiến độ nằm ở stderr. Để stdout chỉ có link sau khi thành công:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py run --input my_problem --url-only
@@ -177,6 +177,8 @@ Checkpoint có dấu vân tay đầu vào local, ghi nhận các request upload 
 
 Nếu đang dở một trong bốn request upload này, `resume` gửi lại vào **đúng tên file/testset** rồi ghi nhận khi API trả thành công. Bước đã có ghi nhận thành công được bỏ qua khi đầu vào local không đổi. Checkpoint của bản cũ tự chuyển sang cơ chế này; các quy tắc khôi phục tạo bài, commit và build package vẫn được giữ riêng.
 
+Checkpoint lưu lựa chọn Full/Verify trước khi gửi yêu cầu build. Nếu mất phản hồi, `resume` xác minh và theo dõi đúng package đã yêu cầu, không gửi build trùng. Với checkpoint bản cũ đã yêu cầu Standard, công cụ xác minh/chờ đúng package cũ kết thúc rồi tạo **một package Full mới trên cùng revision đã commit**, lưu package cũ trong lịch sử. Package Standard cũ không được báo là kết quả Full; các lỗi/xung đột đang có vẫn cần xử lý trước.
+
 Các tình huống cần xử lý:
 
 - **Kẹt tại `checker.cpp`, `gen.cpp`, `solution` hoặc `script` do lỗi đọc lại của bản cũ:** cập nhật repository, giữ nguyên bộ đầu vào và `run_state.json`, rồi chạy `python polygon_upload.py resume --state run_state.json`. Công cụ gửi lại bước đang dở và tiếp tục trên cùng bài, không còn lỗi so sánh byte/nội dung cho bốn phần này.
@@ -209,7 +211,7 @@ Checkpoint được ghi nguyên tử và có khóa tiến trình để tránh ha
 
 ## Link Polygon và trình duyệt tùy chọn
 
-Tài liệu API không cam kết trường `url` trong đối tượng Problem/Package. Công cụ trước hết đọc `problem.xml` từ đúng package Standard và chỉ dùng URL nếu thực sự có trong metadata phù hợp. Không tự ghép URL từ owner/name, không trả link editor, API hoặc ZIP để thay link bài.
+Tài liệu API không cam kết trường `url` trong đối tượng Problem/Package. Package **Full** gồm các bản ZIP `standard`, `linux` và `windows`. Công cụ đọc `problem.xml` từ bản ZIP `standard` của đúng package đã build Full và chỉ dùng URL nếu thực sự có trong metadata phù hợp. Tham số tải ZIP `type=standard` không thay đổi lựa chọn build `full=true`; API tải ZIP không có `type=full`. Không tự ghép URL từ owner/name, không trả link editor, API hoặc ZIP để thay link bài.
 
 Nếu package không cung cấp link, dùng nhánh đọc giao diện bằng Playwright:
 

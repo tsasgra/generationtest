@@ -171,7 +171,11 @@ def _browser_url(problem: dict, profile: Path, timeout: float) -> str:
 
 def resolve_problem_url(api, problem: dict, package_id: int, *, browser: bool = False,
                         profile: Path = Path(".polygon-browser"), timeout: float = 300) -> str:
-    """Read the exact READY package's descriptor, then optionally the real DOM."""
+    """Read the READY Full build's standard ZIP descriptor, then optionally the DOM.
+
+    Polygon's full=True build includes standard/linux/windows archives. The
+    download endpoint still takes one of those types; it has no type='full'.
+    """
     payload = api.call("problem.package", {
         "problemId": problem["id"], "packageId": package_id, "type": "standard",
     }, binary=True)

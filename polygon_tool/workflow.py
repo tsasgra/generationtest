@@ -131,7 +131,7 @@ class Workflow:
             'revision': self.state['revision'], 'package_id': self.state.get('package_id'),
             'input_digest': self.state['input_digest']})
         for key in ('committed', 'package_id', 'package_state', 'package_comment',
-                    'build_before_ids', 'completed', 'result'):
+                    'build_before_ids', 'build_full', 'build_verify', 'completed', 'result'):
             self.state.pop(key, None)
         self.state.update(input_digest=digest(self.parts), input_path=self.options['input_path'],
                           options=self.options)
@@ -149,7 +149,8 @@ class Workflow:
             raise WorkflowError('Package chưa FAILED ở revision đã ghi; không tạo thêm package.')
         self.state.setdefault('history', []).append({
             'revision': self.state['revision'], 'package_id': self.state['package_id'], 'state': 'FAILED'})
-        for key in ('package_id', 'package_state', 'package_comment', 'build_before_ids'):
+        for key in ('package_id', 'package_state', 'package_comment', 'build_before_ids',
+                    'build_full', 'build_verify'):
             self.state.pop(key, None)
         self.save()
 
@@ -529,6 +530,8 @@ class Workflow:
 
     def package(self):
         self.step = 'package'
+        if not self.state.get('committed'):
+            raise WorkflowError('Chưa xác nhận Commit Changes thành công; không tạo package.')
         self.verify_samples()
         meta = self.check_revision()
         if meta['modified']:
@@ -551,9 +554,14 @@ class Workflow:
             blockers = cautions.get('packageReadinessIssues', [])
             if blockers:
                 raise WorkflowError('Polygon chặn package: ' + '; '.join(i['message'] for i in blockers))
-            self.state.update(pending='build', build_before_ids=[p['id'] for p in packages])
+            # Full is a build option, not a package archive type. A Full build
+            # includes standard/linux/windows; track its standard descriptor ID.
+            # Persist the requested mode BEFORE sending the non-idempotent call.
+            self.state.update(pending='build', build_before_ids=[p['id'] for p in packages],
+                              build_full=True, build_verify=True)
             self.save()
-            result = self.write('problem.buildPackage', full=False, verify=True)
+            self.log(f'Đang tạo package Full (Verify bật) cho revision {revision} đã commit.')
+            result = self.write('problem.buildPackage', full=True, verify=True)
             # Some versions return no result. Reconcile the list, never repeat build.
             if isinstance(result, dict) and isinstance(result.get('id'), int):
                 if result.get('revision') != revision or result.get('type') != 'standard':
@@ -571,14 +579,30 @@ class Workflow:
                 raise WorkflowError('Không tìm thấy package ID đã ghi; không build thêm.')
             package = matches[0]
             if package['revision'] != revision or package['type'] != 'standard':
-                raise WorkflowError('Package không thuộc revision và loại Standard đã yêu cầu.')
+                raise WorkflowError('Package không thuộc revision đã commit hoặc sai loại ZIP standard.')
             self.state['package_state'] = package['state']
             self.state['package_comment'] = package.get('comment', '')
             self.save()
+            if not self.state.get('build_full') and package['state'] in ('READY', 'FAILED'):
+                # Older checkpoints requested Standard only. First reconcile and
+                # finish that exact job, then deliberately request Full once on
+                # the same committed revision. Never repeat an ambiguous build.
+                self.verify_snapshot()
+                self.state.setdefault('history', []).append({
+                    'revision': revision, 'package_id': package['id'],
+                    'state': package['state'], 'build_full': False})
+                for key in ('package_id', 'package_state', 'package_comment', 'build_before_ids',
+                            'build_full', 'build_verify', 'completed', 'result'):
+                    self.state.pop(key, None)
+                self.options.pop('package_id', None)
+                self.state['options'] = self.options
+                self.save()
+                self.log(f'Package Standard cũ {package["id"]} đã kết thúc; chuyển sang tạo Full.')
+                return self.package()
             if package['state'] == 'FAILED':
                 raise WorkflowError('Package FAILED: ' + package.get('comment', '(Polygon không trả chi tiết)'))
             if package['state'] == 'READY':
-                self.log(f'Package {package["id"]} READY.')
+                self.log(f'Package Full {package["id"]} READY (Verify bật).')
                 return package
             if package['state'] not in ('PENDING', 'RUNNING'):
                 raise WorkflowError('Trạng thái package không nhận diện: ' + str(package['state']))
@@ -617,6 +641,7 @@ class Workflow:
                   'test_count': self.state['test_count'], 'sample_indices': self.state['sample_indices'],
                   'codeforces_access': access, 'revision': self.state['revision'],
                   'package_id': package['id'], 'package_state': package['state'], 'problem_url': url,
+                  'package_full': self.state['build_full'], 'package_verify': self.state['build_verify'],
                   'info': self.read('problem.info')}
         output = Path(self.options.get('output_dir', '.'))
         atomic_json(output / 'result.json', result)
