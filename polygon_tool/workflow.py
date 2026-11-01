@@ -449,14 +449,31 @@ class Workflow:
         self.step = 'samples'
         tests = self.read('problem.tests', testset='tests', noInputs=True)
         samples = detect_sample_indices(tests, self.options.get('sample_indices'))
-        for test in tests:
-            index, flag = test['index'], test['index'] in samples
+        expected = set(samples)
+        pending = self.state.get('pending')
+        if (pending and pending.startswith('sample:')
+                and pending not in {f'sample:{test["index"]}' for test in tests}):
+            raise WorkflowError(f'Test của bước {pending} đã biến mất; không bỏ qua request chưa xác minh.')
+        # One list read already tells us which flags match. Calling action() for
+        # every unchanged test used to cost three API requests per test. Still
+        # reconcile a pending sample even when its flag now has the desired value.
+        changes = [test for test in tests
+                   if test.get('useInStatements') is not (test['index'] in expected)
+                   or pending == f'sample:{test["index"]}']
+        self.log(f'Example: {len(samples)} sample trong {len(tests)} test; '
+                 f'cần cập nhật/xác minh {len(changes)} test.')
+        for position, test in enumerate(changes, 1):
+            index, flag = test['index'], test['index'] in expected
+            self.log(f'Example [{position}/{len(changes)}]: test {index}, '
+                     + ('bật' if flag else 'tắt') + ' Example.')
             def flag_ok(index=index, flag=flag):
                 rows = self.read('problem.tests', testset='tests', noInputs=True)
                 return any(t['index'] == index and t.get('useInStatements') is flag for t in rows)
             self.action(f'sample:{index}', 'problem.saveTest', {'testset': 'tests', 'testIndex': index,
                         'testUseInStatements': flag}, ['tests'],
                         [lambda: self.read('problem.tests', testset='tests', noInputs=True)], flag_ok)
+        self.step = 'samples'
+        self.log(f'Đang đọc lại toàn bộ {len(tests)} test để xác nhận Example...')
         self.verify_samples(required=samples)
         confirmed = self.state['sample_indices']
         self.log(f'Đã xác nhận Example cho tất cả {len(confirmed)} test sample: '
@@ -485,6 +502,10 @@ class Workflow:
                 details.append('Cờ Example không đúng ở test thường: '
                                + ', '.join(map(str, sorted(invalid))) + '.')
             raise WorkflowError(' '.join(details) + ' Chưa thể xác nhận đầy đủ Example trên Polygon.')
+        # Skipped unchanged flags still need one whole-list conflict check:
+        # generator lines, groups, and other test metadata must match too.
+        if tests != self.state['snapshot']['tests']:
+            raise WorkflowError('Xung đột dữ liệu test ngoài checkpoint; không tiếp tục commit/build.')
         self.state.update(sample_indices=sorted(expected), test_count=len(tests))
         self.save()
 
