@@ -36,7 +36,7 @@ echo Đang dừng phiên cũ và dọn dữ liệu để chuẩn bị bài mới
 set "POLYGON_EXIT_CODE=%errorlevel%"
 echo(
 if not "%POLYGON_EXIT_CODE%"=="0" goto execution_failed
-echo Đã hoàn tất. Xem kết quả phía trên.
+echo Đã hoàn tất. Kết quả đã lưu trong result.json và problem_url.txt.
 goto done
 
 :execution_failed
@@ -61,6 +61,7 @@ goto pause_and_exit
 
 :done
 popd
+if "%POLYGON_EXIT_CODE%"=="0" exit /b 0
 
 :pause_and_exit
 echo(

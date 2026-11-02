@@ -13,6 +13,8 @@ Chỉ cần **`start.bat`** ở thư mục chính. Mỗi lần mở Start là b�
 
 **Điền và lưu đủ 10 file trước khi mở Start.** Mỗi lần mở `start.bat`, nội dung đã điền vẫn được giữ nguyên; checkpoint và kết quả của phiên trước sẽ bị xóa. `note.txt` được để trống; chín file còn lại phải có nội dung. Nếu tên bài cũ đã tồn tại trên Polygon, dùng tên định danh mới trong `problem/name problem.txt`.
 
+Khi mở `start.bat` bằng nhấp đúp, cửa sổ tự đóng sau khi toàn bộ quy trình thành công, gồm lấy link bài và lưu `result.json`, `problem_url.txt`. Trạng thái package `READY` chưa phải bước cuối. Nếu có lỗi, cửa sổ vẫn chờ nhấn phím để bạn đọc thông báo và lệnh resume. Nếu gọi Start từ terminal đã mở sẵn, lệnh kết thúc và trả về dấu nhắc của terminal đó.
+
 Start dọn các dữ liệu của uploader trong repository, ngoại trừ toàn bộ thư mục `problem/`:
 
 - Các file `run_state*.json` và file `.tmp`/`.lock` đi kèm, kể cả checkpoint hỏng; các checkpoint đặt tên riêng được nhận diện bằng cấu trúc JSON của uploader.
