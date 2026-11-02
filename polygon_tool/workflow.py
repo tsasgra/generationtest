@@ -144,8 +144,8 @@ class Workflow:
             raise WorkflowError('Chỉ thử lại package đã xác định rõ ID và trạng thái FAILED.')
         self.check_revision()
         self.verify_snapshot()
-        rows = [p for p in self.read('problem.packages') if p['id'] == self.state['package_id']]
-        if len(rows) != 1 or rows[0]['state'] != 'FAILED' or rows[0]['revision'] != self.state['revision']:
+        package = self.tracked_package(self.read('problem.packages'))
+        if package['state'] != 'FAILED':
             raise WorkflowError('Package chưa FAILED ở revision đã ghi; không tạo thêm package.')
         self.state.setdefault('history', []).append({
             'revision': self.state['revision'], 'package_id': self.state['package_id'], 'state': 'FAILED'})
@@ -549,6 +549,23 @@ class Workflow:
         self.save()
         self.log(f'Đã commit revision {meta["revision"]}.')
 
+    def tracked_package(self, packages):
+        """Find the standard descriptor of the saved build, including Full builds."""
+        matches = [p for p in packages if p['id'] == self.state['package_id']]
+        if not matches:
+            raise WorkflowError('Không tìm thấy package ID đã ghi; không build thêm.')
+        if any(p['revision'] != self.state['revision'] for p in matches):
+            raise WorkflowError('Package không thuộc revision đã commit; không build thêm.')
+        # A completed Full build exposes standard/linux/windows with the same ID.
+        # Identify the archive by (id, type), as in pending-build recovery and ZIP
+        # downloads; multiple archive types do not mean the build is missing.
+        standard = [p for p in matches if p['type'] == 'standard']
+        if not standard:
+            raise WorkflowError('Không tìm thấy bản ZIP standard của package ID đã ghi; không build thêm.')
+        if len(standard) != 1:
+            raise WorkflowError('Có nhiều bản ghi ZIP standard của package ID đã ghi; không build thêm.')
+        return standard[0]
+
     def package(self):
         self.step = 'package'
         if not self.state.get('committed'):
@@ -595,12 +612,7 @@ class Workflow:
         while True:
             self.check_revision()
             rows = self.read('problem.packages')
-            matches = [p for p in rows if p['id'] == self.state['package_id']]
-            if len(matches) != 1:
-                raise WorkflowError('Không tìm thấy package ID đã ghi; không build thêm.')
-            package = matches[0]
-            if package['revision'] != revision or package['type'] != 'standard':
-                raise WorkflowError('Package không thuộc revision đã commit hoặc sai loại ZIP standard.')
+            package = self.tracked_package(rows)
             self.state['package_state'] = package['state']
             self.state['package_comment'] = package.get('comment', '')
             self.save()

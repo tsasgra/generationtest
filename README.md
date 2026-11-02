@@ -177,6 +177,8 @@ Nếu đang dở một trong bốn request upload này, `resume` gửi lại và
 
 Checkpoint lưu lựa chọn Full/Verify trước khi gửi yêu cầu build. Nếu mất phản hồi, `resume` xác minh và theo dõi đúng package đã yêu cầu, không gửi build trùng. Với checkpoint bản cũ đã yêu cầu Standard, công cụ xác minh/chờ đúng package cũ kết thúc rồi tạo **một package Full mới trên cùng revision đã commit**, lưu package cũ trong lịch sử. Package Standard cũ không được báo là kết quả Full; các lỗi/xung đột đang có vẫn cần xử lý trước.
 
+Khi Full build hoàn tất, API có thể trả nhiều bản ghi cùng package ID cho các bản ZIP `standard`, `windows` và `linux`. Công cụ theo dõi bản ghi `standard` của đúng ID/revision đã lưu, không coi các bản ZIP cùng ID là package bị mất. Nếu bản cũ báo `Không tìm thấy package ID đã ghi` dù trang Packages đã hiển thị `READY`, cập nhật mã rồi chạy lệnh `resume` ở trên với checkpoint cũ; không cần tạo lại bài hoặc build lại package.
+
 Các tình huống cần xử lý:
 
 - **Màn hình dừng lâu tại `Đang lưu: sample:1` nhưng chưa báo lỗi:** bản cũ gọi API cả cho từng test thường đã đúng, nên 100 test có thể mất hơn 5 phút ở bước Example. Bản hiện tại bỏ các lần gọi thừa và hiển thị tiến độ. Nếu cần dừng để cập nhật mã, dùng Ctrl+C, giữ input/checkpoint, rồi chạy `python polygon_upload.py resume --state run_state.json`; không mở Start vì Start xóa checkpoint. Nếu vẫn chờ lâu hoặc có lỗi API, giữ thông báo lỗi để xác định request gặp vấn đề.
