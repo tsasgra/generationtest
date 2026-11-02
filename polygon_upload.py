@@ -44,7 +44,7 @@ def indices(value):
 def parser():
     cli = argparse.ArgumentParser(description=__doc__)
     sub = cli.add_subparsers(dest='command', required=True)
-    sub.add_parser('start', help='Dừng phiên cũ, dọn checkpoint/kết quả, giữ input rồi chờ Enter để upload (Windows).')
+    sub.add_parser('start', help='Dừng phiên cũ, dọn checkpoint/kết quả, giữ input và upload ngay (Windows).')
     init = sub.add_parser('init', help='Tạo thư mục gồm 10 file .txt trống, mỗi file là một phần.')
     init.add_argument('--output', type=Path, default=Path('problem'), help='Thư mục mới để tạo 10 file .txt.')
     run = sub.add_parser('run', help='Kiểm tra và tạo một bài mới.')

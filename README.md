@@ -9,10 +9,9 @@ Chỉ cần **`start.bat`** ở thư mục chính. Mỗi lần mở Start là b�
 1. Dừng các tiến trình uploader cũ và tiến trình con của chúng.
 2. Xóa checkpoint, kết quả và dữ liệu chạy cũ; **giữ nguyên toàn bộ thư mục `problem/` và nội dung 10 file đầu vào**.
 3. Chỉ tạo bộ 10 file trống nếu thư mục `problem/` chưa tồn tại; không xóa hoặc ghi đè file đã có.
-4. Giữ cửa sổ mở để bạn kiểm tra hoặc cập nhật nội dung bài. Khi điền và lưu xong, nhấn **Enter trong chính cửa sổ này**.
-5. Kiểm tra đủ 10 file rồi upload một bài. Nếu input còn thiếu/sai, chương trình báo lỗi và chờ bạn sửa rồi nhấn Enter lại; bước này không xóa lại nội dung vừa nhập.
+4. Tự chạy upload ngay từ các file đã chuẩn bị, không có màn hình chờ xác nhận hoặc nhấn Enter. Nếu đầu vào thiếu/sai, chương trình báo lỗi và dừng trước khi gọi Polygon; sửa file rồi chạy lại.
 
-**Có thể điền đủ 10 file trước khi mở Start.** Mỗi lần mở `start.bat`, nội dung đã điền vẫn được giữ nguyên; checkpoint và kết quả của phiên trước sẽ bị xóa. `note.txt` được để trống; chín file còn lại phải có nội dung. Nếu tên bài cũ đã tồn tại trên Polygon, dùng tên định danh mới trong `problem/name problem.txt`.
+**Điền và lưu đủ 10 file trước khi mở Start.** Mỗi lần mở `start.bat`, nội dung đã điền vẫn được giữ nguyên; checkpoint và kết quả của phiên trước sẽ bị xóa. `note.txt` được để trống; chín file còn lại phải có nội dung. Nếu tên bài cũ đã tồn tại trên Polygon, dùng tên định danh mới trong `problem/name problem.txt`.
 
 Start dọn các dữ liệu của uploader trong repository, ngoại trừ toàn bộ thư mục `problem/`:
 
@@ -38,7 +37,7 @@ py -m venv .venv
 
 Phần API dùng thư viện chuẩn Python nên `requirements.txt` không có dependency bắt buộc. Các lệnh dưới dùng trực tiếp Python trong virtual environment, không cần đổi Execution Policy hoặc kích hoạt môi trường.
 
-Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Repository private này đã kèm `.env` theo cấu hình của chủ repo; bản clone từ GitHub có sẵn cấu hình để chạy. Bạn có thể điền 10 file trong `problem/` trước khi mở `start.bat`, rồi nhấn Enter trong cửa sổ Start để upload.
+Script tự đọc file `.env` nằm cạnh `polygon_upload.py`. Repository private này đã kèm `.env` theo cấu hình của chủ repo; bản clone từ GitHub có sẵn cấu hình để chạy. Điền và lưu 10 file trong `problem/`, rồi mở `start.bat` để tự upload ngay.
 
 Nếu muốn dùng tài khoản Polygon khác, sửa hai biến `POLYGON_API_KEY` và `POLYGON_API_SECRET` trong `.env`. Script không in credentials hoặc ghi chúng vào checkpoint/kết quả; các giá trị trong `.env` được đọc nguyên văn, không chạy như lệnh shell.
 
@@ -227,7 +226,7 @@ Trình duyệt mở để bạn đăng nhập thủ công lần đầu và mở 
 
 Bộ kiểm thử offline/mock được giữ riêng trong workspace phát triển, không đưa lên GitHub. Repository chứa mã chạy, cấu hình và một bộ 10 file đầu vào trong `problem/`.
 
-Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu. Luồng Start mới được kiểm thử offline/mock về dừng tiến trình, bảo vệ tiến trình hiện tại và tiến trình cha, xóa dữ liệu chạy cũ, giữ nguyên byte của đầu vào, chỉ tạo 10 file trống khi thiếu thư mục, bảo vệ `.env`/mã nguồn, checkpoint đang khóa, chờ điền input và giữ nội dung khi kiểm tra lại.
+Các nhóm kiểm thử bao phủ parser UTF-8/BOM, note rỗng, tiếng Việt/LaTeX, file thiếu/thừa, alias trùng, sample theo index sau triển khai, tránh nhận nhầm `nonsample`, chữ ký/HTTP/API errors, checkpoint/resume, tạo bài/build bị mất phản hồi, xung đột, package `FAILED`, cùng trích xuất URL từ dữ liệu mẫu. Luồng Start mới được kiểm thử offline/mock về dừng tiến trình, bảo vệ tiến trình hiện tại và tiến trình cha, xóa dữ liệu chạy cũ, giữ nguyên byte của đầu vào, chỉ tạo 10 file trống khi thiếu thư mục, bảo vệ `.env`/mã nguồn, checkpoint đang khóa, tự upload không chờ nhập phím và báo lỗi đầu vào trước khi gọi API.
 
 
 **Chưa chạy Start trên Windows hoặc kiểm thử end-to-end với tài khoản Polygon thật trong môi trường phát triển này.** Khả năng compiler phía server, tải file thật, render statement, phiên đăng nhập browser và package thực tế cần được xác nhận bằng lần chạy của bạn. Không có problem ID, package hoặc link thành công thật được tạo sẵn trong repository.

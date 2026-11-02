@@ -9,7 +9,6 @@ import subprocess
 import sys
 
 from .cleanup import reset_workspace
-from .input import parse_problem
 from .workflow import WorkflowError, state_lock
 
 
@@ -105,23 +104,13 @@ def start_fresh(run_cli, directory: Path = REPOSITORY_DIR) -> int:
         with state_lock(directory / '.polygon-start'):
             reset_workspace(directory)
             print('Đã xóa checkpoint và dữ liệu chạy cũ. Nội dung trong problem/ được giữ nguyên.')
-            print(f'Thư mục đầu vào: {directory / "problem"}.')
-            print('Kiểm tra hoặc cập nhật nội dung 10 file. Giữ cửa sổ này mở.')
-            print('Khi đã điền xong, nhấn Enter ở đây để kiểm tra và upload.')
-            while True:
-                input('Nhấn Enter khi đã lưu đủ nội dung (Ctrl+C để thoát): ')
-                try:
-                    parse_problem(directory / 'problem')
-                except (OSError, ValueError) as exc:
-                    print(f'Đầu vào chưa hợp lệ: {exc}', file=sys.stderr)
-                    print('Sửa các file rồi nhấn Enter lại; nội dung vừa điền sẽ được giữ nguyên.')
-                    continue
-                return run_cli(['run', '--input', str(directory / 'problem'),
-                                '--state', str(directory / 'run_state.json'),
-                                '--output-dir', str(directory)])
+            print(f'Đang upload bài từ {directory / "problem"}...')
+            return run_cli(['run', '--input', str(directory / 'problem'),
+                            '--state', str(directory / 'run_state.json'),
+                            '--output-dir', str(directory)])
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         print(f'Không thể bắt đầu phiên mới: {exc}', file=sys.stderr)
         return 1
-    except (KeyboardInterrupt, EOFError):
+    except KeyboardInterrupt:
         print('\nĐã dừng. Mở lại start.bat sẽ dọn checkpoint/kết quả cũ, giữ nguyên problem/.')
         return 130
