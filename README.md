@@ -11,7 +11,7 @@ Chỉ cần **`start.bat`** ở thư mục chính. Mỗi lần mở Start là b�
 3. Chỉ tạo bộ 10 file trống nếu thư mục `problem/` chưa tồn tại; không xóa hoặc ghi đè file đã có.
 4. Tự chạy upload ngay từ các file đã chuẩn bị, không có màn hình chờ xác nhận hoặc nhấn Enter. Nếu đầu vào thiếu/sai, chương trình báo lỗi và dừng trước khi gọi Polygon; sửa file rồi chạy lại.
 
-**Điền và lưu đủ 10 file trước khi mở Start.** Mỗi lần mở `start.bat`, nội dung đã điền vẫn được giữ nguyên; checkpoint và kết quả của phiên trước sẽ bị xóa. `note.txt` được để trống; chín file còn lại phải có nội dung. Nếu tên bài cũ đã tồn tại trên Polygon, dùng tên định danh mới trong `problem/name problem.txt`.
+**Điền và lưu đủ 10 file trước khi mở Start.** Mỗi lần mở `start.bat`, nội dung đã điền vẫn được giữ nguyên; checkpoint và kết quả của phiên trước sẽ bị xóa. `note.txt` được để trống; chín file còn lại phải có nội dung. Nếu tên bài đã tồn tại trên Polygon, script tự nối thêm ký tự `1` để thử tên tiếp theo; không sửa `problem/name problem.txt`.
 
 Khi mở `start.bat` bằng nhấp đúp, cửa sổ tự đóng sau khi toàn bộ quy trình thành công, gồm lấy link bài và lưu `result.json`, `problem_url.txt`. Trạng thái package `READY` chưa phải bước cuối. Nếu có lỗi, cửa sổ vẫn chờ nhấn phím để bạn đọc thông báo và lệnh resume. Nếu gọi Start từ terminal đã mở sẵn, lệnh kết thúc và trả về dấu nhắc của terminal đó.
 
@@ -99,6 +99,22 @@ Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với
 
 Theo cấu hình hiện tại, **checker, generator, solution và script không được đọc lại để so sánh nội dung hoặc compiler**. Khi API trả thành công, công cụ ghi nhận bước tải đã hoàn tất trong checkpoint. Bốn nội dung này cũng không được dùng để đối chiếu snapshot ở bước commit hoặc resume. Script Polygon/FreeMarker chỉ được gửi lên Polygon, không được thực thi như shell trên máy bạn. Việc chọn checker, gán tag `MA`, lấy danh sách test để đánh dấu sample và build package vẫn được thực hiện.
 
+## Tự chọn tên khi trùng
+
+Tên định danh ban đầu lấy từ `problem/name problem.txt`. Khi xác nhận tên đã tồn tại, script nối thêm **một ký tự `1`** và tiếp tục thử:
+
+```text
+digitsum → digitsum1 → digitsum11 → digitsum111 → ...
+```
+
+Nếu tên ban đầu là `digitsum1`, tên kế tiếp là `digitsum11`. Tên hiển thị trong `name.txt` và nội dung cả 10 file đầu vào được giữ nguyên. Tiến độ in tên đang thử, rồi tên và ID bài vừa tạo.
+
+Checkpoint lưu `requested_name` là tên ban đầu và `problem_name` là tên thực tế đang thử/đã tạo. Resume, kiểm tra danh tính và lấy URL dùng tên thực tế. Trong `result.json`, `requested_name` là tên ban đầu, `name` là tên đã tạo thành công. Khi cập nhật cùng bài bằng `--update-input`, tiếp tục giữ tên ban đầu trong `name problem.txt`.
+
+Script kiểm tra danh sách bài trước khi tạo và cũng xử lý phản hồi trùng tên rõ ràng từ API nếu tên vừa bị chiếm giữa hai request. Chỉ lỗi trùng tên mới khiến script thử tên tiếp theo. Lỗi quyền, tên không hợp lệ/quá dài hoặc phản hồi lỗi không nhận diện được vẫn được báo để xử lý.
+
+Nếu request tạo bài mất phản hồi, script giữ đúng tên và checkpoint để xác minh; không đổi tên rồi tạo dư bài. Làm theo lệnh `resume --problem-id ID` trong thông báo sau khi kiểm tra đúng bài trên Polygon. Checkpoint cũ vẫn được hỗ trợ.
+
 ## Statement Resource Files
 
 Đặt tài nguyên trực tiếp trong thư mục `resource/` cạnh `problem/` và `start.bat`:
@@ -162,7 +178,7 @@ Một lần chạy thành công thực hiện:
 6. Poll đúng package ID của revision đó đến `READY`; nếu package Full `FAILED` thì báo lỗi, không tự build lại hoặc báo thành công.
 7. Lấy link chính thức, lưu `result.json` và `problem_url.txt`.
 
-JSON kết quả gồm problem ID, tên định danh, tên hiển thị, ngôn ngữ, số test, sample indices, quyền `codeforces`, revision, package ID/trạng thái, `package_full: true`, `package_verify: true`, link bài và giới hạn/tên file thực tế. Thông báo tiến độ nằm ở stderr. Để stdout chỉ có link sau khi thành công:
+JSON kết quả gồm problem ID, tên định danh thực tế (`name`), tên yêu cầu ban đầu (`requested_name`), tên hiển thị, ngôn ngữ, số test, sample indices, quyền `codeforces`, revision, package ID/trạng thái, `package_full: true`, `package_verify: true`, link bài và giới hạn/tên file thực tế. Thông báo tiến độ nằm ở stderr. Để stdout chỉ có link sau khi thành công:
 
 ```powershell
 .\.venv\Scripts\python.exe polygon_upload.py run --input my_problem --url-only

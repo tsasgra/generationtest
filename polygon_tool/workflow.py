@@ -127,6 +127,8 @@ class Workflow:
             raise WorkflowError('Phải xác định problem ID và snapshot trước khi đổi input.')
         if self.state.get('pending'):
             raise WorkflowError('Còn request chưa xác định kết quả; resume xử lý request đó trước khi đổi input.')
+        if self.parts['name problem'] != self.state.get('requested_name', self.problem_name):
+            raise WorkflowError('Không đổi name problem.txt khi cập nhật cùng problem ID.')
         self.check_revision()  # Also checks slug/owner against the actual object.
         self.verify_snapshot()
         if (digest(self.parts) == self.state['input_digest']
@@ -170,13 +172,17 @@ class Workflow:
     def write(self, method, **params):
         return self.api.call(method, {'problemId': self.state['problem_id'], **params}, mutation=True)
 
+    @property
+    def problem_name(self):
+        return self.state.get('problem_name', self.parts['name problem'])
+
     def metadata(self):
         rows = self.api.call('problems.list', {'id': self.state['problem_id']})
         rows = [r for r in rows if r['id'] == self.state['problem_id'] and not r.get('deleted')]
         if len(rows) != 1:
             raise WorkflowError('Không đọc được chính xác problem ID trong checkpoint.')
         row = rows[0]
-        if row['name'] != self.parts['name problem'] or row['owner'] != self.state['owner']:
+        if row['name'] != self.problem_name or row['owner'] != self.state['owner']:
             raise WorkflowError('Xung đột danh tính problem; dừng để tránh sửa nhầm bài.')
         return row
 
@@ -249,42 +255,81 @@ class Workflow:
             raise WorkflowError('Working copy lỗi thời; cần giải quyết trên Polygon trước khi resume.')
         return meta
 
+    @staticmethod
+    def duplicate_name_error(error, name):
+        # Only explicit name-collision replies authorize another create. Network
+        # errors (even those containing similar words) must be reconciled.
+        if (isinstance(error, TransportError) or error.ambiguous
+                or error.method != 'problem.create' or error.status_code not in (200, 400, 409)):
+            return False
+        message = str(error).removeprefix('problem.create: ').strip()
+        patterns = (
+            r'(?:name:\s*)?(?:a )?problem with (?:this |the same |such (?:a )?)?name already exists[.!]?',
+            r'(?:name:\s*)?(?:problem )?name (?:already exists|is already (?:used|taken|in use))[.!]?',
+            r'(?:name:\s*)?(?:a )?problem with name [\"\']?' + re.escape(name) + r'[\"\']? already exists[.!]?',
+        )
+        return any(re.fullmatch(pattern, message, re.IGNORECASE) for pattern in patterns)
+
+    def next_problem_name(self):
+        previous = self.problem_name
+        self.state.update(problem_name=previous + '1', pending='select-name')
+        self.state.pop('create_before_ids', None)
+        self.save()
+        self.log(f'Tên {previous} đã tồn tại. Thử {self.problem_name}...')
+
     def create_or_recover(self):
         self.step = 'create'
         if 'problem_id' in self.state:
             return
         if not self.state:
-            existing = self.api.call('problems.list', {'name': self.parts['name problem']})
-            if any(r['name'] == self.parts['name problem'] and not r.get('deleted') for r in existing):
-                raise WorkflowError('Đã có bài cùng tên. Hãy dùng checkpoint của bài đó hoặc chọn tên mới; không ghi đè theo tên.')
             self.state = {'version': 1, 'input_path': self.options['input_path'],
                           'input_digest': digest(self.parts), 'options': self.options,
                           'resource_manifest': self.resource_manifest,
-                          'create_before_ids': [r['id'] for r in existing], 'pending': 'create',
-                          'upload_receipts': {}}
-            self.save()  # Durable intent BEFORE the non-idempotent request.
-            result = self.api.call('problem.create', {'name': self.parts['name problem']}, mutation=True)
+                          'requested_name': self.parts['name problem'],
+                          'problem_name': self.parts['name problem'],
+                          'pending': 'select-name', 'upload_receipts': {}}
+            self.save()
+        while self.state.get('pending') == 'select-name':
+            existing = self.api.call('problems.list', {'name': self.problem_name})
+            if any(r['name'] == self.problem_name and not r.get('deleted') for r in existing):
+                self.next_problem_name()
+                continue
+            self.state.update(create_before_ids=[r['id'] for r in existing], pending='create')
+            self.save()  # Durable name and intent BEFORE the non-idempotent call.
+            try:
+                result = self.api.call('problem.create', {'name': self.problem_name}, mutation=True)
+            except APIError as exc:
+                if not self.duplicate_name_error(exc, self.problem_name):
+                    raise
+                self.next_problem_name()
+                continue
             self.bind_created(result)
             return
         # A lost create response is not proof that a same-name object belongs to us.
-        candidates = self.api.call('problems.list', {'name': self.parts['name problem']})
+        candidates = self.api.call('problems.list', {'name': self.problem_name})
         candidates = [p for p in candidates if p['id'] not in self.state['create_before_ids']
-                      and p['name'] == self.parts['name problem'] and not p.get('deleted')]
+                      and p['name'] == self.problem_name and not p.get('deleted')]
         chosen = self.options.get('problem_id')
         matches = [p for p in candidates if p['id'] == chosen and p.get('accessType') == 'OWNER']
         if chosen and len(matches) == 1:
             self.bind_created(matches[0])
             return
         raise WorkflowError('Chưa xác định kết quả tạo bài; không gửi lại problem.create. '
+                            f'Tên đang xác minh: {self.problem_name}. '
                             f'Các ID mới cùng tên: {[p["id"] for p in candidates]}. '
                             'Kiểm tra bài trên Polygon, rồi resume --problem-id ID nếu đúng bài vừa tạo.')
 
     def bind_created(self, problem):
         if not isinstance(problem, dict) or not isinstance(problem.get('id'), int):
             raise WorkflowError('Phản hồi tạo bài thiếu ID; giữ checkpoint để kiểm tra server.')
-        self.state.update(problem_id=problem['id'], owner=problem['owner'],
+        if problem.get('name', self.problem_name) != self.problem_name:
+            raise WorkflowError('Phản hồi tạo bài sai tên; giữ checkpoint để kiểm tra server.')
+        self.state.update(problem_name=self.problem_name,
+                          requested_name=self.state.get('requested_name', self.parts['name problem']),
+                          problem_id=problem['id'], owner=problem['owner'],
                           revision=problem['revision'], pending=None)
         self.save()  # ID persisted before ANY further read or write.
+        self.log(f'Đã tạo bài {self.problem_name}, ID: {problem["id"]}.')
 
     def initialize_snapshot(self):
         if 'snapshot' not in self.state:
@@ -768,7 +813,8 @@ class Workflow:
         self.verify_snapshot()
         self.verify_samples()
         access = next(a['accessType'] for a in self.read('problem.accesses') if a['login'] == 'codeforces')
-        result = {'problem_id': self.state['problem_id'], 'name': self.parts['name problem'],
+        result = {'problem_id': self.state['problem_id'], 'name': self.problem_name,
+                  'requested_name': self.state.get('requested_name', self.parts['name problem']),
                   'display_name': self.parts['name'], 'statement_language': 'vietnamese',
                   'test_count': self.state['test_count'], 'sample_indices': self.state['sample_indices'],
                   'codeforces_access': access, 'revision': self.state['revision'],
