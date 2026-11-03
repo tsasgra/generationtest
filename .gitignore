@@ -17,3 +17,5 @@ work/
 *.log
 tests/
 examples/
+/resource/*
+!/resource/.gitkeep

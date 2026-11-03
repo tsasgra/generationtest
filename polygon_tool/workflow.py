@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from .api import APIError, TransportError
 from .samples import detect_sample_indices
+from .resources import resource_manifest
 
 
 class WorkflowError(RuntimeError):
@@ -69,9 +70,12 @@ def text_equal(a: str, b: str) -> bool:
 
 class Workflow:
     def __init__(self, api, state_path: Path, parts: dict, options: dict,
-                 *, log: Callable[[str], None] | None = None, sleep=time.sleep,
+                 *, resources: dict[str, bytes] | None = None,
+                 log: Callable[[str], None] | None = None, sleep=time.sleep,
                  monotonic=time.monotonic):
         self.api, self.path, self.parts, self.options = api, Path(state_path), parts, options
+        self.resources = resources or {}
+        self.resource_manifest = resource_manifest(self.resources)
         self.log = log or (lambda message: print(message, file=sys.stderr))
         self.sleep, self.clock = sleep, monotonic
         self.state = json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
@@ -125,7 +129,8 @@ class Workflow:
             raise WorkflowError('Còn request chưa xác định kết quả; resume xử lý request đó trước khi đổi input.')
         self.check_revision()  # Also checks slug/owner against the actual object.
         self.verify_snapshot()
-        if digest(self.parts) == self.state['input_digest']:
+        if (digest(self.parts) == self.state['input_digest']
+                and self.resource_manifest == self.state.get('resource_manifest', {})):
             raise WorkflowError('Input không đổi; dùng --retry-failed-package nếu muốn thử lại package FAILED.')
         self.state.setdefault('history', []).append({
             'revision': self.state['revision'], 'package_id': self.state.get('package_id'),
@@ -134,7 +139,9 @@ class Workflow:
                     'build_before_ids', 'build_full', 'build_verify', 'completed', 'result'):
             self.state.pop(key, None)
         self.state.update(input_digest=digest(self.parts), input_path=self.options['input_path'],
-                          options=self.options)
+                          options=self.options, resource_manifest=self.resource_manifest)
+        if self.resources and 'statement_resources' not in self.state['snapshot']:
+            self.state['snapshot']['statement_resources'] = self.statement_resource_inventory()
         self.save()
 
     def retry_failed_package(self):
@@ -192,6 +199,17 @@ class Workflow:
         return {s['name']: {**s, 'sha256': digest(self.raw('problem.viewSolution', name=s['name']))}
                 for s in self.read('problem.solutions') if s['name'] != 'solution.cpp'}
 
+    def statement_resource_inventory(self):
+        inventory = {}
+        for item in self.read('problem.statementResources'):
+            name = item['name']
+            if name in inventory:
+                raise WorkflowError(f'Polygon trả resource trùng tên: {name}')
+            data = self.api.call('problem.viewStatementResource',
+                                 {'problemId': self.state['problem_id'], 'name': name}, binary=True)
+            inventory[name] = hashlib.sha256(data).hexdigest()
+        return inventory
+
     def snapshot(self):
         info = self.read('problem.info')
         other_settings = {}
@@ -205,7 +223,11 @@ class Workflow:
                 value = [{k: v for k, v in row.items() if k not in ('runVerdict', 'runComment')}
                          for row in value]
             other_settings[method] = value
+        resource_snapshot = {}
+        if self.state.get('resource_manifest') or 'statement_resources' in self.state.get('snapshot', {}):
+            resource_snapshot['statement_resources'] = self.statement_resource_inventory()
         return {
+            **resource_snapshot,
             'info': info,
             'statements': self.read('problem.statements'),
             'files': self.file_inventory(),
@@ -237,6 +259,7 @@ class Workflow:
                 raise WorkflowError('Đã có bài cùng tên. Hãy dùng checkpoint của bài đó hoặc chọn tên mới; không ghi đè theo tên.')
             self.state = {'version': 1, 'input_path': self.options['input_path'],
                           'input_digest': digest(self.parts), 'options': self.options,
+                          'resource_manifest': self.resource_manifest,
                           'create_before_ids': [r['id'] for r in existing], 'pending': 'create',
                           'upload_receipts': {}}
             self.save()  # Durable intent BEFORE the non-idempotent request.
@@ -402,6 +425,49 @@ class Workflow:
                         f'Checker cần dùng: checker.cpp; Polygon đang chọn: {selected[0]!r}.'])
         self.log('Đã xác nhận checker đang dùng trên Polygon: checker.cpp.')
 
+    def upload_resources(self):
+        for index, (name, data) in enumerate(self.resources.items(), 1):
+            label = 'resource:' + name
+            self.step = label
+            self.check_revision()
+            self.log(f'Resource [{index}/{len(self.resources)}]: {name}')
+            expected = self.resource_manifest[name]
+            snapshot = self.state['snapshot']['statement_resources']
+
+            def current_hash():
+                if not any(item['name'] == name for item in self.read('problem.statementResources')):
+                    return None
+                content = self.api.call('problem.viewStatementResource',
+                                        {'problemId': self.state['problem_id'], 'name': name}, binary=True)
+                return hashlib.sha256(content).hexdigest()
+
+            current = current_hash()
+            pending = self.state.get('pending')
+            if pending and pending != label:
+                if current != expected:
+                    raise WorkflowError(f'Xung đột {label}; đang chờ xử lý {pending}.')
+                continue
+            if pending == label and current == expected:
+                snapshot[name] = expected
+                self.state['pending'] = None
+                self.save()
+                continue
+            if current != snapshot.get(name):
+                raise WorkflowError(f'Xung đột thay đổi bên ngoài tại {label}; không ghi đè.')
+            if current == expected:
+                continue
+            self.state['pending'] = label
+            self.save()
+            self.write('problem.saveStatementResource', name=name, file=data)
+            if current_hash() != expected:
+                raise WorkflowError(f'{label}: đọc lại không khớp dữ liệu đã gửi.')
+            # Only acknowledge this file. Full snapshot checks before commit
+            # and completion still detect unrelated edits without downloading
+            # every other resource again for each uploaded file.
+            snapshot[name] = expected
+            self.state['pending'] = None
+            self.save()
+
     def upload(self):
         p = self.parts
         info_updates = {k: self.options[k] for k in ('timeLimit', 'memoryLimit', 'inputFile', 'outputFile')
@@ -417,6 +483,7 @@ class Workflow:
             return all(isinstance(got.get(k), str) and text_equal(got[k], v) for k, v in statement.items())
         self.action('statement', 'problem.saveStatement', {'lang': 'vietnamese', 'encoding': 'UTF-8', **statement},
                     ['statements'], [lambda: self.read('problem.statements')], statement_ok)
+        self.upload_resources()
         self.upload_without_readback('checker.cpp')
         # Old checkpoints can have an unresolved generator write before checker
         # selection. Reconcile that write first, without replacing its intent.
@@ -645,6 +712,8 @@ class Workflow:
             self.sleep(min(self.options.get('poll_interval', 5), max(0, deadline - self.clock())))
 
     def run(self, url_resolver):
+        if self.state and self.resource_manifest != self.state.get('resource_manifest', {}):
+            raise WorkflowError('Resource khác checkpoint. Khôi phục resource cũ hoặc dùng resume --update-input để chủ động cập nhật.')
         if self.state and self.state.get('input_digest') != digest(self.parts):
             raise WorkflowError('Nội dung input khác checkpoint. Không tiếp tục ghi đè bài đang chạy.')
         self.create_or_recover()

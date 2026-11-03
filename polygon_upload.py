@@ -12,6 +12,7 @@ from polygon_tool.api import APIError, PolygonAPI, TransportError
 from polygon_tool.credentials import load_credentials
 from polygon_tool.input import init_directory, parse_problem
 from polygon_tool.problem_url import resolve_problem_url
+from polygon_tool.resources import load_resources, resource_manifest
 from polygon_tool.workflow import Workflow, WorkflowError, state_lock
 
 DEFAULT_ENV_FILE = Path(__file__).resolve().parent / '.env'
@@ -50,6 +51,7 @@ def parser():
     run = sub.add_parser('run', help='Kiểm tra và tạo một bài mới.')
     run.add_argument('--input', type=Path, required=True, help='Thư mục chứa đủ 10 file .txt.')
     run.add_argument('--dry-run', action='store_true')
+    run.add_argument('--resource-dir', type=Path, help='Thư mục resource; mặc định cạnh thư mục input.')
     run.add_argument('--time-limit', type=int)
     run.add_argument('--memory-limit', type=int)
     run.add_argument('--input-file')
@@ -112,6 +114,7 @@ def main(argv=None):
             options = {'input_path': str(args.input.resolve()), 'timeLimit': args.time_limit,
                        'memoryLimit': args.memory_limit, 'inputFile': args.input_file,
                        'outputFile': args.output_file, 'source_type': args.source_type}
+            options['resource_path'] = str((args.resource_dir or args.input.resolve().parent / 'resource').absolute())
         else:
             if not args.state.exists():
                 raise ValueError(f'Không có checkpoint: {args.state}')
@@ -134,11 +137,17 @@ def main(argv=None):
                 options[name] = default
         validate_options(options)
         parts = parse_problem(Path(options['input_path']))
+        # Older checkpoints did not include resources; resume them unchanged.
+        resources = load_resources(Path(options['resource_path'])) if options.get('resource_path') else {}
+        if args.command == 'resume' and args.update_input and not options.get('resource_path'):
+            options['resource_path'] = str(Path(options['input_path']).parent / 'resource')
+            resources = load_resources(Path(options['resource_path']))
         if args.command == 'run' and args.dry_run:
             # Offline by design: no credentials, state, API reads, or remote writes.
             print(json.dumps({'valid': True, 'name': parts['name problem'], 'display_name': parts['name'],
                               'statement_language': 'vietnamese', 'sample_indices': options['sample_indices'],
-                              'plan': ['create', 'info', 'statement', 'checker.cpp', 'checker', 'gen.cpp',
+                              'resources': resource_manifest(resources),
+                              'plan': ['create', 'info', 'statement', 'statement resources', 'checker.cpp', 'checker', 'gen.cpp',
                                        'solution (MA)', 'script (tests)', 'samples from server indices',
                                        'codeforces access', 'verify', 'commit', 'Full package (verify=true)', 'official URL'],
                               'defaults': 'Giữ mặc định Polygon cho tùy chọn chưa truyền; in giá trị khi chạy thật.',
@@ -155,7 +164,7 @@ def main(argv=None):
                     raise ValueError('Không đổi sample sau commit. Kiểm tra bài và tạo quy trình mới nếu cần sửa.')
             api = PolygonAPI(key, secret, timeout=options['request_timeout'], retries=options['retries'],
                              interval=options['request_interval'])
-            workflow = Workflow(api, args.state, parts, options)
+            workflow = Workflow(api, args.state, parts, options, resources=resources)
             if args.command == 'resume' and args.update_input:
                 workflow.accept_updated_input()
             if args.command == 'resume' and args.retry_failed_package:

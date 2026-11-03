@@ -55,7 +55,7 @@ def _remove(path: Path, locked: set[Path]) -> None:
 
 
 def reset_workspace(directory: Path) -> None:
-    """Clear known run data, preserving problem/, code, and .env.
+    """Clear known run data, preserving problem/, resource/, code, and .env.
 
     No paths from checkpoint contents are followed. Damaged default checkpoints
     and leftover batch checkpoints are removable without valid JSON.
@@ -64,6 +64,9 @@ def reset_workspace(directory: Path) -> None:
     problem = directory / 'problem'
     if (problem.exists() or problem.is_symlink()) and _linked(problem):
         raise WorkflowError('Thư mục problem là liên kết; không dọn để tránh ảnh hưởng dữ liệu đầu vào.')
+    resource = directory / 'resource'
+    if (resource.exists() or resource.is_symlink()) and (_linked(resource) or not resource.is_dir()):
+        raise WorkflowError('Resource phải là thư mục thường; không dọn để tránh ảnh hưởng dữ liệu đầu vào.')
     files, trees, states = set(), set(), {directory / 'run_state.json'}
     for name in ('results', '.polygon-browser'):
         path = directory / name
@@ -72,7 +75,7 @@ def reset_workspace(directory: Path) -> None:
 
     def scan(folder: Path, owned=False, batch_states=False):
         for path in folder.iterdir():
-            if path.name in {'.env', 'problem'} and folder == directory:
+            if path.name in {'.env', 'problem', 'resource'} and folder == directory:
                 continue
             if not owned and path.name in _PROTECTED:
                 continue
@@ -114,3 +117,4 @@ def reset_workspace(directory: Path) -> None:
         _remove(path, set())
     if not problem.exists():
         init_directory(problem)
+    resource.mkdir(exist_ok=True)

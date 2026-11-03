@@ -7,7 +7,7 @@ Công cụ Python đọc **10 file `.txt` riêng biệt** trong một thư mục
 Chỉ cần **`start.bat`** ở thư mục chính. Mỗi lần mở Start là bắt đầu một bài mới theo thứ tự:
 
 1. Dừng các tiến trình uploader cũ và tiến trình con của chúng.
-2. Xóa checkpoint, kết quả và dữ liệu chạy cũ; **giữ nguyên toàn bộ thư mục `problem/` và nội dung 10 file đầu vào**.
+2. Xóa checkpoint, kết quả và dữ liệu chạy cũ; **giữ nguyên toàn bộ thư mục `problem/`, `resource/` và nội dung đã có**.
 3. Chỉ tạo bộ 10 file trống nếu thư mục `problem/` chưa tồn tại; không xóa hoặc ghi đè file đã có.
 4. Tự chạy upload ngay từ các file đã chuẩn bị, không có màn hình chờ xác nhận hoặc nhấn Enter. Nếu đầu vào thiếu/sai, chương trình báo lỗi và dừng trước khi gọi Polygon; sửa file rồi chạy lại.
 
@@ -15,14 +15,14 @@ Chỉ cần **`start.bat`** ở thư mục chính. Mỗi lần mở Start là b�
 
 Khi mở `start.bat` bằng nhấp đúp, cửa sổ tự đóng sau khi toàn bộ quy trình thành công, gồm lấy link bài và lưu `result.json`, `problem_url.txt`. Trạng thái package `READY` chưa phải bước cuối. Nếu có lỗi, cửa sổ vẫn chờ nhấn phím để bạn đọc thông báo và lệnh resume. Nếu gọi Start từ terminal đã mở sẵn, lệnh kết thúc và trả về dấu nhắc của terminal đó.
 
-Start dọn các dữ liệu của uploader trong repository, ngoại trừ toàn bộ thư mục `problem/`:
+Start dọn các dữ liệu của uploader trong repository, ngoại trừ toàn bộ thư mục `problem/` và `resource/`:
 
 - Các file `run_state*.json` và file `.tmp`/`.lock` đi kèm, kể cả checkpoint hỏng; các checkpoint đặt tên riêng được nhận diện bằng cấu trúc JSON của uploader.
 - Các thư mục checkpoint `*.problems/` còn sót từ bản upload nhiều bài.
 - `result.json`, `problem_url.txt` và các bản `.tmp`, kể cả khi nằm trong thư mục kết quả con; toàn bộ `results/`.
 - Phiên trình duyệt mặc định `.polygon-browser/`, cache `__pycache__/` và file `.log` ở thư mục chính.
 
-`problem/`, `.env`, mã nguồn, tài liệu, Git, môi trường Python và thư mục phát triển `work/` được giữ lại. Công cụ chỉ dọn dữ liệu trong repository, không lần theo đường dẫn trong checkpoint ra ngoài thư mục này. Các thư mục liên kết được bỏ qua hoặc báo lỗi nếu là mục cần xóa. Checkpoint đang khóa hoặc tiến trình không dừng được sẽ làm Start dừng trước khi dọn dữ liệu chạy cũ và upload.
+`problem/`, `resource/`, `.env`, mã nguồn, tài liệu, Git, môi trường Python và thư mục phát triển `work/` được giữ lại. Công cụ chỉ dọn dữ liệu trong repository, không lần theo đường dẫn trong checkpoint ra ngoài thư mục này. Các thư mục liên kết được bỏ qua hoặc báo lỗi nếu là mục cần xóa. Checkpoint đang khóa hoặc tiến trình không dừng được sẽ làm Start dừng trước khi dọn dữ liệu chạy cũ và upload.
 
 `stop.bat`, `start_check.bat`, `start_resume.bat` và launcher CMD trung gian đã được bỏ. Có thể nhấn **Ctrl+C** để dừng trong cửa sổ Start. Khi muốn tiếp tục bài đang dở và giữ input/checkpoint, dùng lệnh `resume` trong mục bên dưới; mở Start luôn tạo phiên mới. Bài và tác vụ đã gửi lên Polygon vẫn tồn tại trên server.
 
@@ -99,6 +99,41 @@ Mỗi file được đọc dưới dạng UTF-8 có hoặc không có BOM. Với
 
 Theo cấu hình hiện tại, **checker, generator, solution và script không được đọc lại để so sánh nội dung hoặc compiler**. Khi API trả thành công, công cụ ghi nhận bước tải đã hoàn tất trong checkpoint. Bốn nội dung này cũng không được dùng để đối chiếu snapshot ở bước commit hoặc resume. Script Polygon/FreeMarker chỉ được gửi lên Polygon, không được thực thi như shell trên máy bạn. Việc chọn checker, gán tag `MA`, lấy danh sách test để đánh dấu sample và build package vẫn được thực hiện.
 
+## Statement Resource Files
+
+Đặt tài nguyên trực tiếp trong thư mục `resource/` cạnh `problem/` và `start.bat`:
+
+```text
+project/
+├── start.bat
+├── problem/
+│   └── ...10 file .txt giữ nguyên...
+└── resource/
+    ├── .gitkeep
+    ├── d.png
+    └── illustration.jpg
+```
+
+Script upload các file này vào **Statement → Statement Resource Files** bằng `problem.saveStatementResource`, dùng chung cho các phần statement. Tên và byte của file được giữ nguyên. Các loại file được chấp nhận phụ thuộc Polygon; lỗi server được báo cùng tên resource. Đây là tài nguyên đính kèm statement; file ví dụ trong thư mục này không tự trở thành test Example.
+
+Bạn tự thêm tham chiếu tại vị trí muốn hiển thị trong `lengend.txt`, `input.txt`, `output.txt` hoặc `note.txt`. Ví dụ với ảnh `resource/d.png`:
+
+```latex
+\includegraphics{d.png}
+```
+
+Script không tự sửa nội dung bốn file trên. Không có resource hoặc thư mục trống thì bỏ qua bước upload. `.gitkeep` không được upload; tài nguyên bạn thêm được Git bỏ qua. Start giữ nguyên toàn bộ `resource/`, chỉ tạo thư mục nếu chưa có. Thư mục con, liên kết và các tên trùng nhau khi không phân biệt hoa/thường bị từ chối trước khi gọi API; hãy đặt các file trực tiếp trong thư mục.
+
+Upload resource diễn ra sau khi lưu statement và trước Commit Changes. Script đọc lại byte để xác nhận, lưu dấu kiểm tra trong checkpoint và đối chiếu lại trước khi hoàn tất. File cùng tên được cập nhật khi dữ liệu server còn khớp checkpoint; thay đổi bên ngoài gây xung đột sẽ được báo. Resume xác minh request mất phản hồi và bỏ qua resource đã đúng, không tạo bài hay build package trùng.
+
+Với CLI, mặc định dùng thư mục `resource/` cạnh thư mục `--input`. Có thể chọn thư mục khác khi tạo phiên:
+
+```powershell
+python polygon_upload.py run --input my_problem --resource-dir my_resources
+```
+
+Resume dùng đường dẫn resource đã lưu. Nếu thêm, sửa hoặc bỏ file local, dùng `resume --state run_state.json --update-input problem` để chủ động cập nhật trên cùng bài, kể cả khi 10 file văn bản không đổi. Bỏ file local không xóa tài nguyên đã có trên Polygon. Checkpoint từ bản cũ chưa có resource vẫn resume như trước; dùng `--update-input` để bổ sung tài nguyên từ `resource/` cạnh thư mục input. Các nội dung upload trong bộ nhớ là dữ liệu đã đọc lúc bắt đầu; hãy lưu xong tất cả file trước khi chạy.
+
 ## Kiểm tra trước khi tạo bài
 
 ```powershell
@@ -119,7 +154,7 @@ Một lần chạy thành công thực hiện:
 2. Lưu và đọc lại statement `vietnamese`; tải `checker.cpp`, gọi `problem.setChecker` để chọn file này làm checker (tương đương nút **Set checker**), rồi đọc `problem.checker` xác nhận lựa chọn. Khi thành công, CLI in `Đã xác nhận checker đang dùng trên Polygon: checker.cpp.`, sau đó mới tải `gen.cpp` và lưu `solution.cpp` với tag `MA`. Không đọc lại nội dung ba file này.
 3. Lưu script test, lấy danh sách test thực tế từ Polygon, cập nhật cờ Example và kiểm tra lại.
 4. Thêm READ cho đúng login `codeforces` nếu chưa có quyền đọc. Quyền READ/WRITE/OWNER đã có được giữ; quyền của tài khoản khác không bị sửa.
-5. Sau khi upload đủ nội dung 10 file và xác nhận mọi sample đã bật Example, thực hiện **Commit Changes**. Chỉ khi Polygon xác nhận commit thành công, revision đã tăng và working copy sạch, công cụ mới gọi **Create package → Full**, với **Verify bật** (`full=true`, `verify=true`).
+5. Sau khi upload đủ nội dung 10 file, các statement resource và xác nhận mọi sample đã bật Example, thực hiện **Commit Changes**. Chỉ khi Polygon xác nhận commit thành công, revision đã tăng và working copy sạch, công cụ mới gọi **Create package → Full**, với **Verify bật** (`full=true`, `verify=true`).
 6. Poll đúng package ID của revision đó đến `READY`; nếu package Full `FAILED` thì báo lỗi, không tự build lại hoặc báo thành công.
 7. Lấy link chính thức, lưu `result.json` và `problem_url.txt`.
 

@@ -1,8 +1,8 @@
 """Authenticated Polygon HTTP transport using the Python standard library.
 
 Protocol: https://codeforces.github.io/polygon-misc/API#authorization
-Text uploads are the documented ``file`` form parameter. The signature covers
-its exact UTF-8 text before URL encoding, just like every other parameter.
+Uploads use the documented ``file`` form parameter. The signature covers exact
+UTF-8 text or raw binary bytes. Binary uploads use multipart/form-data.
 """
 from __future__ import annotations
 
@@ -81,7 +81,9 @@ class PolygonAPI:
         return text
 
     @staticmethod
-    def _value(value: object) -> str:
+    def _value(value: object) -> str | bytes:
+        if isinstance(value, bytes):
+            return value
         if isinstance(value, bool):
             return "true" if value else "false"
         if isinstance(value, str):
@@ -92,10 +94,10 @@ class PolygonAPI:
             return str(value)
         raise ValueError("Tham số Polygon phải là chuỗi, số hoặc bool.")
 
-    def _signed_parameters(self, method: str, params: Mapping | None) -> dict[str, str]:
+    def _signed_parameters(self, method: str, params: Mapping | None) -> dict[str, str | bytes]:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*", method):
             raise ValueError("Tên phương thức Polygon không hợp lệ.")
-        values: dict[str, str] = {}
+        values: dict[str, str | bytes] = {}
         for key, value in (params or {}).items():
             if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", key):
                 raise ValueError("Tên tham số Polygon không hợp lệ.")
@@ -106,10 +108,30 @@ class PolygonAPI:
         values["apiKey"] = self._key
         values["time"] = str(int(time.time()))
         prefix = secrets.token_hex(3)
-        canonical = "&".join(f"{k}={v}" for k, v in sorted(values.items()))
-        payload = f"{prefix}/{method}?{canonical}#{self._secret}"
-        values["apiSig"] = prefix + hashlib.sha512(payload.encode("utf-8")).hexdigest()
+        canonical = b'&'.join(k.encode('utf-8') + b'=' +
+                              (v if isinstance(v, bytes) else v.encode('utf-8'))
+                              for k, v in sorted(values.items()))
+        payload = f'{prefix}/{method}?'.encode('utf-8') + canonical + b'#' + self._secret.encode('utf-8')
+        values["apiSig"] = prefix + hashlib.sha512(payload).hexdigest()
         return values
+
+    @staticmethod
+    def _form_body(signed):
+        if not any(isinstance(value, bytes) for value in signed.values()):
+            return (urllib.parse.urlencode(signed, encoding='utf-8').encode('ascii'),
+                    'application/x-www-form-urlencoded; charset=UTF-8')
+        boundary = 'polygon-' + secrets.token_hex(24)
+        chunks = []
+        for name, value in signed.items():
+            binary = isinstance(value, bytes)
+            disposition = f'Content-Disposition: form-data; name="{name}"'
+            if binary:
+                disposition += f'; filename="{name}"'
+            chunks.append(f'--{boundary}\r\n{disposition}\r\n\r\n'.encode('ascii'))
+            chunks.append(value if binary else value.encode('utf-8'))
+            chunks.append(b'\r\n')
+        chunks.append(f'--{boundary}--\r\n'.encode('ascii'))
+        return b''.join(chunks), f'multipart/form-data; boundary={boundary}'
 
     def _throttle(self) -> None:
         if self._last_request is not None:
@@ -132,10 +154,11 @@ class PolygonAPI:
         for attempt in range(attempts):
             self._throttle()
             signed = self._signed_parameters(method, params)
+            body, content_type = self._form_body(signed)
             request = urllib.request.Request(
                 BASE_URL + method,
-                data=urllib.parse.urlencode(signed, encoding="utf-8").encode("ascii"),
-                headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                data=body,
+                headers={"Content-Type": content_type,
                          "Accept": "*/*" if raw or binary else "application/json",
                          "User-Agent": "polygon-upload/1.0"},
                 method="POST",

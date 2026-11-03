@@ -103,7 +103,7 @@ def start_fresh(run_cli, directory: Path = REPOSITORY_DIR) -> int:
         print(f'Đã dừng {stopped} tiến trình uploader cũ cùng các tiến trình con.')
         with state_lock(directory / '.polygon-start'):
             reset_workspace(directory)
-            print('Đã xóa checkpoint và dữ liệu chạy cũ. Nội dung trong problem/ được giữ nguyên.')
+            print('Đã xóa checkpoint và dữ liệu chạy cũ. Nội dung trong problem/ và resource/ được giữ nguyên.')
             print(f'Đang upload bài từ {directory / "problem"}...')
             return run_cli(['run', '--input', str(directory / 'problem'),
                             '--state', str(directory / 'run_state.json'),
