@@ -137,8 +137,12 @@ def main(argv=None):
                 options[name] = default
         validate_options(options)
         parts = parse_problem(Path(options['input_path']))
+        cleanup_only = (args.command == 'resume' and not args.update_input
+                        and not args.retry_failed_package and state.get('completed')
+                        and 'resource_cleanup' in state)
         # Older checkpoints did not include resources; resume them unchanged.
-        resources = load_resources(Path(options['resource_path'])) if options.get('resource_path') else {}
+        resources = (load_resources(Path(options['resource_path']))
+                     if options.get('resource_path') and not cleanup_only else {})
         if args.command == 'resume' and args.update_input and not options.get('resource_path'):
             options['resource_path'] = str(Path(options['input_path']).parent / 'resource')
             resources = load_resources(Path(options['resource_path']))
@@ -172,7 +176,13 @@ def main(argv=None):
             if workflow.state:
                 workflow.state['options'] = options
                 workflow.save()
-            result = workflow.run(resolve_problem_url)
+            if cleanup_only:
+                # Upload, verification and result files were already completed.
+                # Resources may now be absent or belong to the next problem.
+                result = workflow.state['result']
+            else:
+                result = workflow.run(resolve_problem_url)
+            workflow.finish_resource_cleanup()
         if args.url_only:
             print(result['problem_url'])
         else:

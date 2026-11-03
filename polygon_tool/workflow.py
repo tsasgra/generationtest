@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from .api import APIError, TransportError
 from .samples import detect_sample_indices
-from .resources import resource_manifest
+from .resources import resource_manifest, remove_uploaded_resource
 
 
 class WorkflowError(RuntimeError):
@@ -136,7 +136,7 @@ class Workflow:
             'revision': self.state['revision'], 'package_id': self.state.get('package_id'),
             'input_digest': self.state['input_digest']})
         for key in ('committed', 'package_id', 'package_state', 'package_comment',
-                    'build_before_ids', 'build_full', 'build_verify', 'completed', 'result'):
+                    'build_before_ids', 'build_full', 'build_verify', 'completed', 'result', 'resource_cleanup'):
             self.state.pop(key, None)
         self.state.update(input_digest=digest(self.parts), input_path=self.options['input_path'],
                           options=self.options, resource_manifest=self.resource_manifest)
@@ -710,6 +710,36 @@ class Workflow:
                 raise WorkflowError('Hết thời gian chờ package; resume tiếp tục poll cùng package ID.')
             self.log(f'Package {package["id"]}: {package["state"]}')
             self.sleep(min(self.options.get('poll_interval', 5), max(0, deadline - self.clock())))
+
+    def finish_resource_cleanup(self):
+        """Called only after saved results; a durable per-file queue survives crashes."""
+        if not self.state.get('completed') or not self.state.get('result'):
+            raise WorkflowError('Chưa lưu kết quả hoàn tất; không xóa resource.')
+        if not self.options.get('resource_path') or not self.state.get('resource_manifest'):
+            return
+        self.step = 'resource-cleanup'
+        if 'resource_cleanup' not in self.state:
+            self.state['resource_cleanup'] = {
+                'directory': self.options['resource_path'],
+                'pending': list(self.state['resource_manifest']), 'removed': [], 'kept': []}
+            self.save()  # Durable cleanup intent before deleting the first file.
+        cleanup = self.state['resource_cleanup']
+        output = Path(self.options.get('output_dir', '.'))
+        protected = {self.path.resolve(), self.path.with_name(self.path.name + '.lock').resolve(),
+                     (output / 'result.json').resolve(), (output / 'problem_url.txt').resolve()}
+        while cleanup['pending']:
+            name = cleanup['pending'][0]
+            outcome = remove_uploaded_resource(
+                Path(cleanup['directory']), name, self.state['resource_manifest'][name],
+                protected=protected, input_directory=Path(self.options['input_path']))
+            if outcome == 'kept':
+                cleanup['kept'].append(name)
+                self.log(f'Giữ resource đã thay đổi hoặc được bảo vệ: {name}')
+            else:
+                cleanup['removed'].append(name)
+                self.log(f'Đã dọn resource: {name}')
+            cleanup['pending'].pop(0)
+            self.save()
 
     def run(self, url_resolver):
         if self.state and self.resource_manifest != self.state.get('resource_manifest', {}):

@@ -122,7 +122,11 @@ Bạn tự thêm tham chiếu tại vị trí muốn hiển thị trong `lengend
 \includegraphics{d.png}
 ```
 
-Script không tự sửa nội dung bốn file trên. Không có resource hoặc thư mục trống thì bỏ qua bước upload. `.gitkeep` không được upload; tài nguyên bạn thêm được Git bỏ qua. Start giữ nguyên toàn bộ `resource/`, chỉ tạo thư mục nếu chưa có. Thư mục con, liên kết và các tên trùng nhau khi không phân biệt hoa/thường bị từ chối trước khi gọi API; hãy đặt các file trực tiếp trong thư mục.
+Script không tự sửa nội dung bốn file trên. Không có resource hoặc thư mục trống thì bỏ qua bước upload. `.gitkeep` không được upload; tài nguyên bạn thêm được Git bỏ qua. Khi bắt đầu, Start giữ nguyên toàn bộ `resource/`, chỉ tạo thư mục nếu chưa có. Thư mục con, liên kết và các tên trùng nhau khi không phân biệt hoa/thường bị từ chối trước khi gọi API; hãy đặt các file trực tiếp trong thư mục.
+
+**Sau khi toàn bộ quy trình thành công**, gồm package Full READY, lấy link bài và lưu `result.json`, `problem_url.txt` cùng checkpoint hoàn tất, script tự xóa các file resource đã upload trên máy. Thư mục `resource/` và `.gitkeep` được giữ lại cho bài mới; bản resource trên Polygon vẫn còn. `problem/`, `.env` và các file kết quả không bị xóa. Nếu upload, build, lấy link hoặc lưu kết quả lỗi, resource được giữ để resume.
+
+Chỉ file thuộc phiên vừa hoàn tất và còn nguyên nội dung đã upload mới được xóa. File mới thêm, file đã sửa trong lúc chạy hoặc được thay bằng liên kết sẽ được giữ lại và ghi thông báo. Nếu dọn resource gặp lỗi, ví dụ file đang bị khóa trên Windows, dùng `resume` để tiếp tục dọn. Checkpoint ghi tiến độ từng file; resume ở giai đoạn này trả kết quả đã lưu, không upload/build lại và không xóa những file đã chuẩn bị cho bài tiếp theo sau khi dọn xong.
 
 Upload resource diễn ra sau khi lưu statement và trước Commit Changes. Script đọc lại byte để xác nhận, lưu dấu kiểm tra trong checkpoint và đối chiếu lại trước khi hoàn tất. File cùng tên được cập nhật khi dữ liệu server còn khớp checkpoint; thay đổi bên ngoài gây xung đột sẽ được báo. Resume xác minh request mất phản hồi và bỏ qua resource đã đúng, không tạo bài hay build package trùng.
 
